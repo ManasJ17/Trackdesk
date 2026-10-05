@@ -1,0 +1,321 @@
+@import url('https://fonts.googleapis.com/css2?family=Caveat&family=Dancing+Script&family=Pacifico&display=swap');
+
+.sign-page {
+  display: flex;
+  height: 100vh;
+  font-family: var(--font-family);
+  background: var(--color-bg-primary);
+}
+
+.sign-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sign-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border-primary);
+  background: var(--color-bg-primary);
+  flex-shrink: 0;
+}
+
+.sign-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex: 1;
+}
+
+.sign-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.sign-field-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  width: 48px;
+  flex-shrink: 0;
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border-primary);
+  overflow-y: auto;
+}
+
+.sign-field-toolbar-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.sign-field-toolbar-divider {
+  width: 28px;
+  height: 1px;
+  background: var(--color-border-secondary);
+  margin: 4px 0;
+}
+
+.sign-field-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sign-field-toolbar-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.sign-field-toolbar-btn[draggable="true"] {
+  cursor: grab;
+}
+
+.sign-field-toolbar-btn[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Page thumbnails sidebar */
+.sign-page-thumbnails {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 6px;
+  width: 72px;
+  flex-shrink: 0;
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border-primary);
+  overflow-y: auto;
+}
+
+.sign-page-thumbnail {
+  position: relative;
+  display: block;
+  width: 100%;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0;
+  background: var(--color-bg-primary);
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.sign-page-thumbnail:hover {
+  border-color: var(--color-border-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.sign-page-thumbnail--active {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.3);
+}
+
+.sign-page-thumbnail-label {
+  display: block;
+  text-align: center;
+  font-size: 9px;
+  font-family: var(--font-family);
+  color: var(--color-text-tertiary);
+  padding: 2px 0;
+  background: var(--color-bg-secondary);
+}
+
+/* Right sidebar panel */
+.sign-right-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-border-primary);
+  background: var(--color-bg-primary);
+  overflow-y: auto;
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.sign-right-sidebar-divider {
+  height: 1px;
+  background: var(--color-border-secondary);
+  margin: var(--spacing-xs) 0;
+}
+
+/* Upload feedback */
+.sign-upload-feedback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--spacing-sm);
+  padding: 40px;
+}
+
+/* Empty overlay on PDF page */
+.sign-hint-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: #FEF9EF;
+  border-bottom: 1px solid #F5DEB3;
+  color: #8B6914;
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family);
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .sign-hint-banner {
+  background: #2D2714;
+  border-bottom-color: #4A3D1A;
+  color: #D4B060;
+}
+
+/* Document list row status border */
+.sign-doc-row {
+  transition: background 0.1s, border-color 0.15s;
+}
+
+.sign-content {
+  flex: 1;
+  overflow: auto;
+  background: var(--color-bg-tertiary);
+}
+
+.sign-field:hover .sign-field-delete-btn {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.sign-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-lg) var(--spacing-2xl);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.sign-list-header h2 {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.sign-doc-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sign-doc-table th {
+  text-align: left;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+}
+
+.sign-doc-table td {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.sign-doc-table tr {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.sign-doc-table tbody tr:hover {
+  background: var(--color-surface-hover);
+}
+
+.sign-field {
+  user-select: none;
+}
+
+.sign-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--spacing-lg);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-md);
+  padding: 40px;
+  text-align: center;
+}
+
+.sign-public-container {
+  min-height: 100vh;
+  background: var(--color-bg-tertiary);
+  font-family: var(--font-family);
+}
+
+.sign-public-header {
+  padding: var(--spacing-lg) var(--spacing-2xl);
+  background: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sign-public-header h1 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.sign-public-content {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: var(--spacing-2xl);
+}
+
+.sign-public-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: var(--spacing-lg);
+  text-align: center;
+}
+
+.sign-public-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: var(--spacing-lg);
+  text-align: center;
+  color: var(--color-error);
+}

@@ -1,0 +1,1292 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../../lib/api-client';
+import { queryKeys } from '../../config/query-keys';
+import type {
+  Task, TaskProject,
+  CreateTaskInput, UpdateTaskInput,
+  Subtask, TaskActivity, TaskTemplate, TaskComment,
+  CreateTaskTemplateInput,
+  TaskAttachment, TaskDependency,
+} from '@atlas-platform/shared';
+
+// ─── Inline Types ──────────────────────────────────────────────────
+
+interface ListTasksResponse { tasks: Task[]; }
+interface ListProjectsResponse { projects: TaskProject[]; }
+
+export interface WorkProject {
+  id: string;
+  name: string;
+  description: string | null;
+  companyId: string | null;
+  companyName: string | null;
+  status: 'active' | 'paused' | 'completed' | 'archived';
+  color: string;
+  hourlyRate: number;
+  budgetHours: number | null;
+  budgetAmount: number | null;
+  isBillable: boolean;
+  totalHours: number;
+  billableHours: number;
+  billedHours: number;
+  totalAmount: number;
+  unbilledHours: number;
+  isArchived: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TimeEntry {
+  id: string;
+  projectId: string;
+  projectName: string | null;
+  projectColor: string | null;
+  userId: string;
+  date: string;
+  hours: number;
+  description: string | null;
+  tags: string[];
+  isBillable: boolean;
+  billingStatus: 'unbilled' | 'billed' | 'paid';
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecentTimeEntry {
+  id: string;
+  projectId: string;
+  projectName: string;
+  projectColor: string;
+  userId: string;
+  userName: string | null;
+  hours: number;
+  date: string;
+  description: string | null;
+  tags: string[];
+  isBillable: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EnhancedDashboard {
+  hoursThisWeek: number;
+  activeProjects: number;
+  outstandingInvoices: number;
+  totalOutstandingAmount: number;
+  overdueInvoices: number;
+  totalOverdueAmount: number;
+  unbilledHours: number;
+  revenue: {
+    invoiced: number;
+    paid: number;
+    outstanding: number;
+  };
+  hoursByDay: Array<{ date: string; hours: number }>;
+  recentTimeEntries: RecentTimeEntry[];
+  recentInvoiceActions: Array<{
+    id: string;
+    invoiceNumber: string;
+    clientName: string | null;
+    status: string;
+    amount: number;
+    updatedAt: string;
+  }>;
+}
+
+export interface ProjectFinancialInvoice {
+  id: string;
+  invoiceNumber: string;
+  issueDate: string;
+  dueDate: string;
+  total: number;
+  balanceDue: number;
+  status: string;
+  currency: string;
+}
+
+export interface ProjectFinancials {
+  summary: {
+    totalBilled: number;
+    totalPaid: number;
+    outstanding: number;
+    currency: string;
+  };
+  invoices: ProjectFinancialInvoice[];
+}
+
+export interface ProjectMember {
+  id: string;
+  userId: string;
+  projectId: string;
+  hourlyRate: number | null;
+  userName?: string;
+  userEmail?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TimeEntryLineItemPreview {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  projectId: string;
+  projectName: string;
+  workDate: string;
+}
+
+// ─── Project transform helper ──────────────────────────────────────
+
+function mapWorkProject(raw: Record<string, unknown>): WorkProject {
+  return {
+    id: raw.id as string,
+    name: raw.name as string,
+    description: (raw.description as string) ?? null,
+    companyId: (raw.companyId as string) ?? (raw.clientId as string) ?? null,
+    companyName: (raw.companyName as string) ?? (raw.clientName as string) ?? null,
+    status: (raw.status as WorkProject['status']) ?? 'active',
+    color: (raw.color as string) ?? '#6b7280',
+    hourlyRate: (raw.defaultHourlyRate as number) || (raw.hourlyRate as number) || 0,
+    budgetHours: (raw.estimatedHours as number) ?? null,
+    budgetAmount: (raw.estimatedAmount as number) ?? null,
+    isBillable: (raw.billable as boolean) ?? true,
+    totalHours: typeof raw.totalTrackedMinutes === 'number' ? raw.totalTrackedMinutes / 60 : 0,
+    billableHours: typeof raw.billableMinutes === 'number' ? raw.billableMinutes / 60 : 0,
+    billedHours: typeof raw.billedMinutes === 'number' ? raw.billedMinutes / 60 : 0,
+    totalAmount: (raw.totalBilledAmount as number) ?? 0,
+    unbilledHours: typeof raw.unbilledMinutes === 'number' ? raw.unbilledMinutes / 60 : 0,
+    isArchived: (raw.isArchived as boolean) ?? false,
+    sortOrder: (raw.sortOrder as number) ?? 0,
+    createdAt: (raw.createdAt as string) ?? '',
+    updatedAt: (raw.updatedAt as string) ?? '',
+  };
+}
+
+function mapTimeEntry(raw: Record<string, unknown>): TimeEntry {
+  return {
+    id: raw.id as string,
+    projectId: raw.projectId as string,
+    projectName: (raw.projectName as string) ?? null,
+    projectColor: (raw.projectColor as string) ?? null,
+    userId: raw.userId as string,
+    date: (raw.workDate as string) ?? (raw.date as string) ?? '',
+    hours: typeof raw.durationMinutes === 'number' ? raw.durationMinutes / 60 : (raw.hours as number) ?? 0,
+    description: (raw.notes as string) ?? (raw.description as string) ?? null,
+    tags: Array.isArray(raw.tags) ? (raw.tags as string[]) : [],
+    isBillable: (raw.billable as boolean) ?? true,
+    billingStatus: (raw.billingStatus as TimeEntry['billingStatus']) ?? 'unbilled',
+    isArchived: (raw.isArchived as boolean) ?? false,
+    createdAt: (raw.createdAt as string) ?? '',
+    updatedAt: (raw.updatedAt as string) ?? '',
+  };
+}
+
+// ─── Task Queries ───────────────────────────────────────────────────
+
+export function useTaskList(filters?: {
+  status?: string;
+  when?: string;
+  projectId?: string | null;
+  assigneeId?: string;
+  includeArchived?: boolean;
+  visibility?: 'private' | 'team';
+}, options?: { enabled?: boolean }) {
+  const filterKey = filters ? JSON.stringify(filters) : '';
+  return useQuery({
+    queryKey: queryKeys.work.tasks.list(filterKey),
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.when) params.set('when', filters.when);
+      if (filters?.projectId !== undefined) params.set('projectId', filters.projectId === null ? 'null' : filters.projectId);
+      if (filters?.assigneeId) params.set('assigneeId', filters.assigneeId);
+      if (filters?.includeArchived) params.set('includeArchived', 'true');
+      if (filters?.visibility) params.set('visibility', filters.visibility);
+      const qs = params.toString();
+      const { data } = await api.get(`/work/tasks${qs ? `?${qs}` : ''}`);
+      return data.data as ListTasksResponse;
+    },
+    staleTime: 15_000,
+    enabled: options?.enabled,
+  });
+}
+
+export function useTask(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.detail(id!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/tasks/${id}`);
+      return data.data as Task;
+    },
+    enabled: !!id,
+    staleTime: 10_000,
+  });
+}
+
+export function useTaskCounts(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.counts,
+    queryFn: async () => {
+      const { data } = await api.get('/work/tasks/counts');
+      return data.data as {
+        inbox: number;
+        today: number;
+        upcoming: number;
+        anytime: number;
+        someday: number;
+        logbook: number;
+        total: number;
+        team: number;
+      };
+    },
+    staleTime: 15_000,
+    enabled: options?.enabled,
+  });
+}
+
+// ─── Task Mutations ─────────────────────────────────────────────────
+
+export function useCreateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: CreateTaskInput) => {
+      const { data } = await api.post('/work/tasks', input);
+      return data.data as Task;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+export function useUpdateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updatedAt, ...input }: UpdateTaskInput & { id: string; updatedAt?: string }) => {
+      const { data } = await api.patch(`/work/tasks/${id}`, input, {
+        headers: updatedAt ? { 'If-Unmodified-Since': updatedAt } : undefined,
+      });
+      return data.data as Task;
+    },
+    onSuccess: (task) => {
+      queryClient.setQueryData(queryKeys.work.tasks.detail(task.id), task);
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+export function useDeleteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/work/tasks/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+export function useBulkDeleteTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { data } = await api.delete('/work/tasks/bulk', { data: { ids } });
+      return data.data as { deleted: number };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+// ─── Task Project Queries & Mutations ──────────────────────────────
+
+export function useTaskProjectList(includeArchived = false) {
+  return useQuery({
+    queryKey: includeArchived ? [...queryKeys.work.tasks.projects, 'archived'] : queryKeys.work.tasks.projects,
+    queryFn: async () => {
+      const params = includeArchived ? '?includeArchived=true' : '';
+      const { data } = await api.get(`/work/projects${params}`);
+      const raw = data.data as { projects: Array<Record<string, unknown>> };
+      const projects = raw.projects.map((p) => ({
+        ...(p as unknown as TaskProject),
+        title: (p.title as string) ?? (p.name as string) ?? '',
+      }));
+      return { projects } as ListProjectsResponse;
+    },
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateTaskProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...input }: { id: string; name?: string; description?: string }) => {
+      const { data } = await api.patch(`/work/projects/${id}`, input);
+      return data.data as TaskProject;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.projects });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.all });
+    },
+  });
+}
+
+// ─── Reorder Mutation ──────────────────────────────────────────────
+
+export function useReorderTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskIds: string[]) => {
+      await api.patch('/work/tasks/reorder', { taskIds });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+// ─── Subtask Hooks ──────────────────────────────────────────────────
+
+export function useSubtasks(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.subtasks(taskId!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/tasks/${taskId}/subtasks`);
+      return data.data as Subtask[];
+    },
+    enabled: !!taskId,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateSubtask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, title }: { taskId: string; title: string }) => {
+      const { data } = await api.post(`/work/tasks/${taskId}/subtasks`, { title });
+      return data.data as Subtask;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.subtasks(vars.taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+export function useUpdateSubtask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ subtaskId, taskId, ...input }: { subtaskId: string; taskId: string; title?: string; isCompleted?: boolean }) => {
+      const { data } = await api.patch(`/work/tasks/subtasks/${subtaskId}`, input);
+      return data.data as Subtask;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.subtasks(vars.taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+export function useDeleteSubtask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ subtaskId, taskId }: { subtaskId: string; taskId: string }) => {
+      await api.delete(`/work/tasks/subtasks/${subtaskId}`);
+      return taskId;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.subtasks(vars.taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+// ─── Comment Hooks ──────────────────────────────────────────────────
+
+export function useTaskComments(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.comments(taskId!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/tasks/${taskId}/comments`);
+      return data.data as TaskComment[];
+    },
+    enabled: !!taskId,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, body }: { taskId: string; body: string }) => {
+      const { data } = await api.post(`/work/tasks/${taskId}/comments`, { body });
+      return data.data as TaskComment;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.comments(vars.taskId) });
+    },
+  });
+}
+
+export function useDeleteComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ commentId, taskId }: { commentId: string; taskId: string }) => {
+      await api.delete(`/work/tasks/comments/${commentId}`);
+      return taskId;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.comments(vars.taskId) });
+    },
+  });
+}
+
+// ─── Activity Hooks ─────────────────────────────────────────────────
+
+export function useTaskActivities(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.activities(taskId!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/tasks/${taskId}/activities`);
+      return data.data as TaskActivity[];
+    },
+    enabled: !!taskId,
+    staleTime: 30_000,
+  });
+}
+
+// ─── Template Hooks ─────────────────────────────────────────────────
+
+export function useTaskTemplates() {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.templates,
+    queryFn: async () => {
+      const { data } = await api.get('/work/tasks/templates/list');
+      return data.data as TaskTemplate[];
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateTaskTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: CreateTaskTemplateInput) => {
+      const { data } = await api.post('/work/tasks/templates', input);
+      return data.data as TaskTemplate;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.templates });
+    },
+  });
+}
+
+export function useDeleteTaskTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (templateId: string) => {
+      await api.delete(`/work/tasks/templates/${templateId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.templates });
+    },
+  });
+}
+
+export function useCreateTaskFromTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (templateId: string) => {
+      const { data } = await api.post(`/work/tasks/from-template/${templateId}`);
+      return data.data as Task;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+// ─── Visibility ────────────────────────────────────────────────────
+
+export function useUpdateTaskVisibility() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, visibility }: { id: string; visibility: 'private' | 'team' }) => {
+      await api.patch(`/work/tasks/${id}/visibility`, { visibility });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+// ─── Attachment Hooks ──────────────────────────────────────────────
+
+export function useTaskAttachments(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.attachments(taskId!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/tasks/${taskId}/attachments`);
+      return data.data as TaskAttachment[];
+    },
+    enabled: !!taskId,
+    staleTime: 10_000,
+  });
+}
+
+export function useAddAttachment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, file }: { taskId: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post(`/work/tasks/${taskId}/attachments`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return data.data as TaskAttachment;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.attachments(vars.taskId) });
+    },
+  });
+}
+
+export function useDeleteAttachment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ attachmentId, taskId }: { attachmentId: string; taskId: string }) => {
+      await api.delete(`/work/tasks/attachments/${attachmentId}`);
+      return taskId;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.attachments(vars.taskId) });
+    },
+  });
+}
+
+// ─── Dependency Hooks ──────────────────────────────────────────────
+
+export function useTaskDependencies(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.dependencies(taskId!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/tasks/${taskId}/dependencies`);
+      return data.data as TaskDependency[];
+    },
+    enabled: !!taskId,
+    staleTime: 10_000,
+  });
+}
+
+export function useAddDependency() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, blockedByTaskId }: { taskId: string; blockedByTaskId: string }) => {
+      const { data } = await api.post(`/work/tasks/${taskId}/dependencies`, { blockedByTaskId });
+      return data.data as TaskDependency;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.dependencies(vars.taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.blockedIds });
+    },
+  });
+}
+
+export function useRemoveDependency() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, blockerTaskId }: { taskId: string; blockerTaskId: string }) => {
+      await api.delete(`/work/tasks/${taskId}/dependencies/${blockerTaskId}`);
+      return taskId;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.dependencies(vars.taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.blockedIds });
+    },
+  });
+}
+
+export function useBlockedTaskIds() {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.blockedIds,
+    queryFn: async () => {
+      const { data } = await api.get('/work/tasks/blocked');
+      return data.data as string[];
+    },
+    staleTime: 15_000,
+  });
+}
+
+// ─── Work Project (Projects app) Queries ─────────────────────────
+
+export function useDashboard() {
+  return useQuery({
+    queryKey: queryKeys.work.projects.dashboard,
+    queryFn: async () => {
+      const { data } = await api.get('/work/projects/dashboard');
+      return data.data as EnhancedDashboard;
+    },
+    staleTime: 15_000,
+  });
+}
+
+export function useProjects(filters?: { search?: string; status?: string; companyId?: string }) {
+  const filterKey = filters ? JSON.stringify(filters) : '';
+  return useQuery({
+    queryKey: [...queryKeys.work.projects.projects.all, filterKey],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters?.search) params.set('search', filters.search);
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.companyId) params.set('companyId', filters.companyId);
+      const qs = params.toString();
+      const { data } = await api.get(`/work/projects${qs ? `?${qs}` : ''}`);
+      const raw = data.data as { projects: Record<string, unknown>[] };
+      return { projects: raw.projects.map(mapWorkProject) };
+    },
+    staleTime: 15_000,
+  });
+}
+
+export function useWorkProject(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.projects.projects.detail(id!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/projects/${id}`);
+      return mapWorkProject(data.data as Record<string, unknown>);
+    },
+    enabled: !!id,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      name: string;
+      description?: string | null;
+      companyId?: string | null;
+      status?: string;
+      color?: string;
+      hourlyRate?: number;
+      budgetHours?: number | null;
+      budgetAmount?: number | null;
+      isBillable?: boolean;
+    }) => {
+      const { data } = await api.post('/work/projects', {
+        name: input.name,
+        description: input.description,
+        companyId: input.companyId,
+        status: input.status,
+        color: input.color,
+        billable: input.isBillable,
+        estimatedHours: input.budgetHours,
+        estimatedAmount: input.budgetAmount,
+        defaultHourlyRate: input.hourlyRate,
+      });
+      return data.data as WorkProject;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.all });
+    },
+  });
+}
+
+export function useUpdateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updatedAt, ...input }: { id: string; updatedAt?: string } & Partial<{
+      name: string;
+      description: string | null;
+      companyId: string | null;
+      status: string;
+      color: string;
+      hourlyRate: number;
+      budgetHours: number | null;
+      budgetAmount: number | null;
+      isBillable: boolean;
+      isArchived: boolean;
+    }>) => {
+      const payload: Record<string, unknown> = {};
+      if (input.name !== undefined) payload.name = input.name;
+      if (input.description !== undefined) payload.description = input.description;
+      if (input.companyId !== undefined) payload.companyId = input.companyId;
+      if (input.status !== undefined) payload.status = input.status;
+      if (input.color !== undefined) payload.color = input.color;
+      if (input.isBillable !== undefined) payload.billable = input.isBillable;
+      if (input.budgetHours !== undefined) payload.estimatedHours = input.budgetHours;
+      if (input.budgetAmount !== undefined) payload.estimatedAmount = input.budgetAmount;
+      if (input.isArchived !== undefined) payload.isArchived = input.isArchived;
+      if (input.hourlyRate !== undefined) payload.defaultHourlyRate = input.hourlyRate;
+      const { data } = await api.patch(`/work/projects/${id}`, payload, {
+        headers: updatedAt ? { 'If-Unmodified-Since': updatedAt } : undefined,
+      });
+      return data.data as WorkProject;
+    },
+    onSuccess: (project) => {
+      queryClient.setQueryData(queryKeys.work.projects.projects.detail(project.id), project);
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.all });
+    },
+  });
+}
+
+export function useUpdateProjectStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const { data } = await api.patch(`/work/projects/${id}`, { status });
+      return data.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.work.projects.projects.all });
+      qc.invalidateQueries({ queryKey: queryKeys.work.projects.dashboard });
+    },
+  });
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/work/projects/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.all });
+    },
+  });
+}
+
+// ─── Project Financials ───────────────────────────────────────────
+
+export function useProjectFinancials(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.projects.financials(id!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/projects/${id}/financials`);
+      return data.data as ProjectFinancials;
+    },
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+}
+
+// ─── Project Members ─────────────────────────────────────────────
+
+export function useProjectMembers(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ['work', 'projects', 'members', projectId],
+    queryFn: async () => {
+      const { data } = await api.get(`/work/projects/${projectId}/members`);
+      const result = data.data;
+      return (result?.members ?? result) as ProjectMember[];
+    },
+    enabled: !!projectId,
+    staleTime: 10_000,
+  });
+}
+
+// ─── Time Entry Queries ───────────────────────────────────────────
+
+export function useTimeEntries(filters?: { projectId?: string; startDate?: string; endDate?: string }) {
+  const filterKey = filters ? JSON.stringify(filters) : '';
+  return useQuery({
+    queryKey: queryKeys.work.projects.timeEntries.list(filterKey),
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters?.projectId) params.set('projectId', filters.projectId);
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+      const qs = params.toString();
+      const { data } = await api.get(`/work/time-entries${qs ? `?${qs}` : ''}`);
+      const raw = data.data as { entries: Record<string, unknown>[] };
+      return { entries: raw.entries.map(mapTimeEntry) };
+    },
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateTimeEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      projectId: string;
+      date: string;
+      hours: number;
+      description?: string | null;
+      tags?: string[];
+      isBillable?: boolean;
+    }) => {
+      const { data } = await api.post('/work/time-entries', {
+        projectId: input.projectId,
+        workDate: input.date,
+        durationMinutes: Math.round(input.hours * 60),
+        notes: input.description,
+        tags: input.tags,
+        billable: input.isBillable,
+      });
+      return data.data as TimeEntry;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.all });
+    },
+  });
+}
+
+export function useUpdateTimeEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updatedAt, ...input }: { id: string; updatedAt?: string } & Partial<{
+      projectId: string;
+      date: string;
+      hours: number;
+      description: string | null;
+      tags: string[];
+      isBillable: boolean;
+    }>) => {
+      const payload: Record<string, unknown> = {};
+      if (input.projectId !== undefined) payload.projectId = input.projectId;
+      if (input.date !== undefined) payload.workDate = input.date;
+      if (input.hours !== undefined) payload.durationMinutes = Math.round(input.hours * 60);
+      if (input.description !== undefined) payload.notes = input.description;
+      if (input.tags !== undefined) payload.tags = input.tags;
+      if (input.isBillable !== undefined) payload.billable = input.isBillable;
+      const { data } = await api.patch(`/work/time-entries/${id}`, payload, {
+        headers: updatedAt ? { 'If-Unmodified-Since': updatedAt } : undefined,
+      });
+      return data.data as TimeEntry;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.all });
+    },
+  });
+}
+
+export function useDeleteTimeEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/work/time-entries/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.all });
+    },
+  });
+}
+
+// ─── Project Member Mutations ─────────────────────────────────────
+
+export function useAddProjectMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, userId, hourlyRate }: { projectId: string; userId: string; hourlyRate?: number | null }) => {
+      const { data } = await api.post(`/work/projects/${projectId}/members`, { userId, hourlyRate });
+      return data.data;
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.projects.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.projects.detail(vars.projectId) });
+      queryClient.invalidateQueries({ queryKey: ['work', 'projects', 'members', vars.projectId] });
+    },
+  });
+}
+
+export function useRemoveProjectMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, memberId }: { projectId: string; memberId: string }) => {
+      await api.delete(`/work/projects/${projectId}/members/${memberId}`);
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.projects.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.projects.detail(vars.projectId) });
+      queryClient.invalidateQueries({ queryKey: ['work', 'projects', 'members', vars.projectId] });
+    },
+  });
+}
+
+// ─── Project File Mutations ───────────────────────────────────────
+
+export function useLinkProjectFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, driveItemId }: { projectId: string; driveItemId: string }) => {
+      await api.post(`/work/projects/${projectId}/files`, { driveItemId });
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.projects.files(vars.projectId) });
+    },
+  });
+}
+
+export function useUnlinkProjectFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, driveItemId }: { projectId: string; driveItemId: string }) => {
+      await api.delete(`/work/projects/${projectId}/files/${driveItemId}`);
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.projects.files(vars.projectId) });
+    },
+  });
+}
+
+// ─── Time Billing ──────────────────────────────────────────────────
+
+export function usePreviewTimeEntries() {
+  return useMutation({
+    mutationFn: async (input: {
+      companyId: string;
+      startDate: string;
+      endDate: string;
+      timeEntryIds?: string[];
+    }) => {
+      const { data } = await api.post('/work/projects/time-billing/preview', input);
+      return (data.data?.lineItems ?? []) as TimeEntryLineItemPreview[];
+    },
+  });
+}
+
+export function usePopulateFromTimeEntries() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      invoiceId: string;
+      companyId: string;
+      startDate: string;
+      endDate: string;
+      timeEntryIds?: string[];
+    }) => {
+      const { data } = await api.post('/work/projects/time-billing/populate', input);
+      return data.data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(variables.invoiceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.all });
+    },
+  });
+}
+
+// ─── Work settings (tenant-wide) ──────────────────────────────────
+
+export type WorkWeekStartDay = 'monday' | 'sunday' | 'saturday';
+export type WorkProjectVisibility = 'team' | 'private';
+
+export interface WorkSettings {
+  weekStartDay: WorkWeekStartDay;
+  defaultProjectVisibility: WorkProjectVisibility;
+  defaultBillable: boolean;
+}
+
+export function useWorkSettings() {
+  return useQuery({
+    queryKey: queryKeys.work.projects.settings,
+    queryFn: async () => {
+      const { data } = await api.get('/work/settings');
+      return data.data as WorkSettings;
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateWorkSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: Partial<WorkSettings>) => {
+      const { data } = await api.patch('/work/settings', input);
+      return data.data as WorkSettings;
+    },
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKeys.work.projects.settings, settings);
+    },
+  });
+}
+
+
+// ─── Task Statuses (issue #8 phase 4) ─────────────────────────────
+
+export type TaskStatusCategory = 'open' | 'done' | 'cancelled';
+
+export interface TaskStatusRow {
+  id: string;
+  tenantId: string;
+  name: string;
+  category: TaskStatusCategory;
+  color: string;
+  legacySlug: string | null;
+  isDefault: boolean;
+  sortOrder: number;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useTaskStatuses() {
+  return useQuery({
+    queryKey: queryKeys.work.taskStatuses.all,
+    queryFn: async () => {
+      const { data } = await api.get('/work/task-statuses');
+      return data.data as TaskStatusRow[];
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateTaskStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { name: string; category: TaskStatusCategory; color?: string }) => {
+      const { data } = await api.post('/work/task-statuses', input);
+      return data.data as TaskStatusRow;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.taskStatuses.all });
+    },
+  });
+}
+
+export function useUpdateTaskStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updatedAt, ...input }: { id: string; updatedAt?: string; name?: string; category?: TaskStatusCategory; color?: string; sortOrder?: number }) => {
+      const { data } = await api.patch(`/work/task-statuses/${id}`, input, {
+        headers: updatedAt ? { 'If-Unmodified-Since': updatedAt } : undefined,
+      });
+      return data.data as TaskStatusRow;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.taskStatuses.all });
+    },
+  });
+}
+
+export function useArchiveTaskStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/work/task-statuses/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.taskStatuses.all });
+    },
+  });
+}
+
+export function useReorderTaskStatuses() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      await api.patch('/work/task-statuses/reorder', { ids });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.taskStatuses.all });
+    },
+  });
+}
+
+// ─── Task Time Tracking Hooks ───────────────────────────────────────
+
+export interface TaskTimeEntry {
+  id: string;
+  taskId: string;
+  projectId: string;
+  userId: string;
+  durationMinutes: number;
+  workDate: string;
+  startTime: string | null;
+  endTime: string | null;
+  notes: string | null;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ActiveTimer {
+  id: string;
+  taskId: string;
+  projectId: string;
+  startedAt: string;
+  note: string | null;
+  taskTitle?: string | null;
+}
+
+interface TaskTimeResponse {
+  entries: TaskTimeEntry[];
+  totalMinutes: number;
+}
+
+export function useTaskTimeEntries(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.work.tasks.time(taskId!),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/tasks/${taskId}/time-entries`);
+      return data.data as TaskTimeResponse;
+    },
+    enabled: !!taskId,
+    staleTime: 10_000,
+  });
+}
+
+export function useLogTaskTime() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, ...input }: {
+      taskId: string;
+      projectId?: string | null;
+      durationMinutes: number;
+      workDate?: string;
+      startTime?: string | null;
+      endTime?: string | null;
+      notes?: string | null;
+      tags?: string[];
+    }) => {
+      const { data } = await api.post(`/work/tasks/${taskId}/time-entries`, input);
+      return data.data as TaskTimeEntry;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.time(vars.taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.all });
+    },
+  });
+}
+
+export function useUpdateTaskTimeEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, entryId, ...input }: {
+      taskId: string;
+      entryId: string;
+      durationMinutes?: number;
+      workDate?: string;
+      startTime?: string | null;
+      endTime?: string | null;
+      notes?: string | null;
+      tags?: string[];
+    }) => {
+      const { data } = await api.patch(`/work/tasks/${taskId}/time-entries/${entryId}`, input);
+      return data.data as TaskTimeEntry;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.time(vars.taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.all });
+    },
+  });
+}
+
+export function useDeleteTaskTimeEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, entryId }: { taskId: string; entryId: string }) => {
+      await api.delete(`/work/tasks/${taskId}/time-entries/${entryId}`);
+      return taskId;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.time(vars.taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.all });
+    },
+  });
+}
+
+export function useActiveTimer() {
+  return useQuery({
+    queryKey: queryKeys.work.timer,
+    queryFn: async () => {
+      const { data } = await api.get('/work/timer/active');
+      return data.data as ActiveTimer | null;
+    },
+    // Light polling so a timer started elsewhere stays in sync.
+    refetchInterval: 30_000,
+    staleTime: 5_000,
+  });
+}
+
+export function useStartTaskTimer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, projectId, note }: { taskId: string; projectId?: string | null; note?: string | null }) => {
+      const { data } = await api.post(`/work/tasks/${taskId}/timer/start`, { projectId, note });
+      return data.data as ActiveTimer;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.timer });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+    },
+  });
+}
+
+export function useStopTimer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId?: string) => {
+      const { data } = await api.post('/work/timer/stop', {});
+      return { entry: data.data as TaskTimeEntry, taskId };
+    },
+    onSuccess: ({ taskId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.timer });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.projects.all });
+      if (taskId) queryClient.invalidateQueries({ queryKey: queryKeys.work.tasks.time(taskId) });
+    },
+  });
+}
+
+export function useCancelTimer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await api.post('/work/timer/cancel', {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.work.timer });
+    },
+  });
+}
+
+// ─── Team time report (admin-only) ──────────────────────────────────
+
+export interface TimeReportProjectBreakdown {
+  projectId: string;
+  projectName: string;
+  projectColor: string | null;
+  minutes: number;
+}
+export interface TimeReportTaskBreakdown {
+  taskId: string | null;
+  taskDescription: string;
+  minutes: number;
+}
+export interface TimeReportUser {
+  userId: string;
+  userName: string;
+  totalMinutes: number;
+  billableMinutes: number;
+  entryCount: number;
+  byProject: TimeReportProjectBreakdown[];
+  byTask: TimeReportTaskBreakdown[];
+}
+export interface TeamTimeReport {
+  from: string;
+  to: string;
+  totalMinutes: number;
+  totalBillableMinutes: number;
+  users: TimeReportUser[];
+}
+
+export function useTeamTimeReport(from: string, to: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.work.teamTimeReport(`${from}|${to}`),
+    queryFn: async () => {
+      const { data } = await api.get(`/work/reports/time?from=${from}&to=${to}`);
+      return data.data as TeamTimeReport;
+    },
+    enabled: enabled && !!from && !!to,
+    staleTime: 60_000,
+  });
+}

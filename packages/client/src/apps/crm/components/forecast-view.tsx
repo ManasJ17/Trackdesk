@@ -1,0 +1,101 @@
+import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import { TrendingUp, DollarSign, Trophy } from 'lucide-react';
+import { useForecast, type CrmForecast } from '../hooks';
+import { formatCurrencyCompact } from '../../../lib/format';
+import { Skeleton } from '../../../components/ui/skeleton';
+import { StatCard } from '../../../components/ui/stat-card';
+
+function ForecastSkeleton() {
+  return (
+    <div style={{ padding: 'var(--spacing-xl)' }}>
+      <div style={{ display: 'flex', gap: 'var(--spacing-lg)', marginBottom: 'var(--spacing-xl)' }}>
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} width={200} height={80} style={{ borderRadius: 'var(--radius-md)' }} />
+        ))}
+      </div>
+      <Skeleton width="100%" height={300} style={{ borderRadius: 'var(--radius-md)' }} />
+    </div>
+  );
+}
+
+export function ForecastView() {
+  const { t } = useTranslation();
+  const { data: forecast, isLoading } = useForecast();
+
+  const months = forecast?.months ?? [];
+
+  const maxValue = useMemo(() => {
+    if (!months.length) return 1;
+    return Math.max(...months.map((m) => m.weightedValue ?? 0), 1);
+  }, [months]);
+
+  if (isLoading || !forecast) return <ForecastSkeleton />;
+
+  const hasAnyData = (forecast.totalWeighted ?? 0) > 0 || months.some((m) => (m.weightedValue ?? 0) > 0);
+
+  return (
+    <div style={{ padding: 'var(--spacing-xl)', maxWidth: 1100 }}>
+      {!hasAnyData && (
+        <div style={{
+          padding: 'var(--spacing-md)',
+          marginBottom: 'var(--spacing-lg)',
+          background: 'var(--color-bg-secondary)',
+          borderRadius: 'var(--radius-md)',
+          fontSize: 'var(--font-size-sm)',
+          color: 'var(--color-text-secondary)',
+          fontFamily: 'var(--font-family)',
+        }}>
+          {t('crm.forecast.noDealsHint', 'No open deals to forecast yet. Create a deal with an expected close date to see it here.')}
+        </div>
+      )}
+      {/* Summary cards */}
+      <div style={{ display: 'flex', gap: 'var(--spacing-md)', marginBottom: 'var(--spacing-xl)', flexWrap: 'wrap' }}>
+        <StatCard
+          label={t('crm.forecast.weightedForecast')}
+          value={formatCurrencyCompact(forecast.totalWeighted ?? 0)}
+          color="var(--color-accent-primary)"
+          icon={TrendingUp}
+        />
+        <StatCard
+          label={t('crm.forecast.bestCase')}
+          value={formatCurrencyCompact(forecast.bestCase ?? 0)}
+          color="#3b82f6"
+          icon={DollarSign}
+        />
+        <StatCard
+          label={t('crm.forecast.committed')}
+          value={formatCurrencyCompact(forecast.committed ?? 0)}
+          color="var(--color-success)"
+          icon={Trophy}
+        />
+      </div>
+
+      {/* Monthly bar chart */}
+      <div className="crm-dashboard-card">
+        <h3 className="crm-dashboard-card-title">{t('crm.forecast.monthlyForecast')}</h3>
+        {months.length === 0 ? (
+          <div className="crm-dashboard-empty">{t('crm.forecast.noData', 'No forecast data available')}</div>
+        ) : (
+          <div className="crm-bar-chart">
+            {months.map((month) => (
+              <div key={month.month} className="crm-bar-row">
+                <span className="crm-bar-label" style={{ minWidth: 80 }}>{month.month ?? '--'}</span>
+                <div className="crm-bar-track">
+                  <div
+                    className="crm-bar"
+                    style={{
+                      width: `${Math.max(((month.weightedValue ?? 0) / maxValue) * 100, 2)}%`,
+                      backgroundColor: 'var(--color-accent-primary)',
+                    }}
+                  />
+                </div>
+                <span className="crm-bar-value">{formatCurrencyCompact(month.weightedValue ?? 0)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

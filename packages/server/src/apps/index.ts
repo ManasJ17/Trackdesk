@@ -1,0 +1,21 @@
+import { serverAppRegistry } from '../config/app-registry.server';
+import { crmServerManifest } from './crm/manifest';
+import { hrServerManifest } from './hr/manifest';
+import { signServerManifest } from './sign/manifest';
+import { driveServerManifest } from './drive/manifest';
+import { docsServerManifest } from './docs/manifest';
+import { drawServerManifest } from './draw/manifest';
+import { systemServerManifest } from './system/manifest';
+import { invoicesServerManifest } from './invoices/manifest';
+import { workServerManifest } from './work/manifest';
+serverAppRegistry.register(crmServerManifest);
+serverAppRegistry.register(hrServerManifest);
+serverAppRegistry.register(signServerManifest);
+serverAppRegistry.register(driveServerManifest);
+serverAppRegistry.register(docsServerManifest);
+serverAppRegistry.register(drawServerManifest);
+serverAppRegistry.register(systemServerManifest);
+serverAppRegistry.register(invoicesServerManifest);
+serverAppRegistry.register(workServerManifest);
+
+export { serverAppRegistry };

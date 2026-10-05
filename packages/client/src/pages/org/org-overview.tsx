@@ -1,0 +1,243 @@
+import type { CSSProperties, ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { Users, UserPlus, ArrowRight } from 'lucide-react';
+import { useAuthStore } from '../../stores/auth-store';
+import { useTenantUsers, useMyTenants } from '../../hooks/use-platform';
+import { ROUTES } from '../../config/routes';
+import { Button } from '../../components/ui/button';
+import { Skeleton } from '../../components/ui/skeleton';
+
+// ---------------------------------------------------------------------------
+// StatCard
+// ---------------------------------------------------------------------------
+
+interface StatCardProps {
+  label: string;
+  value: number;
+  color: string;
+  icon: ReactNode;
+  onClick?: () => void;
+}
+
+function StatCard({ label, value, color, icon, onClick }: StatCardProps) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: 'var(--color-bg-primary)',
+        border: '1px solid var(--color-border-primary)',
+        borderRadius: 'var(--radius-md)',
+        padding: 'var(--spacing-xl)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--spacing-md)',
+        boxShadow: 'var(--shadow-sm)',
+        transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
+        cursor: onClick ? 'pointer' : 'default',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = '0 4px 12px color-mix(in srgb, var(--color-border-primary) 40%, transparent)';
+        if (onClick) e.currentTarget.style.borderColor = 'var(--color-accent-primary)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+        e.currentTarget.style.borderColor = 'var(--color-border-primary)';
+      }}
+    >
+      <div
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 'var(--radius-md)',
+          background: `color-mix(in srgb, ${color} 12%, transparent)`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </div>
+      <div
+        style={{
+          fontSize: 'var(--font-size-3xl)',
+          fontWeight: 'var(--font-weight-bold)',
+          color: 'var(--color-text-primary)',
+          lineHeight: 1,
+          letterSpacing: '-0.02em',
+        }}
+      >
+        {value.toLocaleString()}
+      </div>
+      <div
+        style={{
+          fontSize: 'var(--font-size-sm)',
+          color: 'var(--color-text-tertiary)',
+          fontWeight: 'var(--font-weight-medium)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        {label}
+        {onClick && <ArrowRight size={14} style={{ opacity: 0.5 }} />}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SkeletonCard
+// ---------------------------------------------------------------------------
+
+function SkeletonCard() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        background: 'var(--color-bg-primary)',
+        border: '1px solid var(--color-border-primary)',
+        borderRadius: 'var(--radius-md)',
+        padding: 'var(--spacing-xl)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--spacing-md)',
+        boxShadow: 'var(--shadow-sm)',
+      }}
+    >
+      <Skeleton width={40} height={40} borderRadius="var(--radius-md)" />
+      <Skeleton width={48} height={28} borderRadius="var(--radius-sm)" />
+      <Skeleton width={88} height={14} borderRadius="var(--radius-sm)" />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// QuickActionCard
+// ---------------------------------------------------------------------------
+
+function QuickActionCard({ icon, label, description, onClick }: {
+  icon: ReactNode;
+  label: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      variant="secondary"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--spacing-md)',
+        padding: 'var(--spacing-lg)',
+        height: 'auto',
+        textAlign: 'left',
+        width: '100%',
+        justifyContent: 'flex-start',
+      }}
+    >
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 'var(--radius-sm)',
+          background: 'color-mix(in srgb, var(--color-accent-primary) 10%, transparent)',
+          color: 'var(--color-accent-primary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)' }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+          {description}
+        </div>
+      </div>
+      <ArrowRight size={14} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+    </Button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OrgOverviewPage
+// ---------------------------------------------------------------------------
+
+export function OrgOverviewPage() {
+  const { t } = useTranslation();
+  const tenantId = useAuthStore((s) => s.tenantId);
+  const { data: tenants, isLoading: tenantsLoading } = useMyTenants();
+  const effectiveTenantId = tenantId ?? tenants?.[0]?.id;
+  const navigate = useNavigate();
+
+  const { data: users, isLoading: usersLoading } = useTenantUsers(effectiveTenantId ?? undefined);
+
+  const isLoading = tenantsLoading || usersLoading;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2xl)' }}>
+      {/* Stat cards */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+          gap: 'var(--spacing-lg)',
+        }}
+      >
+        {isLoading ? (
+          <>
+            <SkeletonCard />
+            <SkeletonCard />
+          </>
+        ) : (
+          <>
+            <StatCard
+              label={t('org.overview.teamMembers')}
+              value={users?.length ?? 0}
+              color="var(--color-accent-primary)"
+              icon={<Users size={18} strokeWidth={2} />}
+              onClick={() => navigate(ROUTES.ORG_MEMBERS)}
+            />
+          </>
+        )}
+      </div>
+
+      {/* Quick actions */}
+      <div>
+        <h3
+          style={{
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 'var(--font-weight-semibold)',
+            color: 'var(--color-text-primary)',
+            marginBottom: 'var(--spacing-md)',
+          }}
+        >
+          {t('org.overview.quickActions')}
+        </h3>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gap: 'var(--spacing-sm)',
+          }}
+        >
+          <QuickActionCard
+            icon={<UserPlus size={16} />}
+            label={t('org.overview.addTeamMember')}
+            description={t('org.overview.addTeamMemberDesc')}
+            onClick={() => navigate(ROUTES.ORG_MEMBERS)}
+          />
+        </div>
+      </div>
+
+    </div>
+  );
+}

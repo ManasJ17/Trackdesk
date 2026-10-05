@@ -1,0 +1,285 @@
+import { create } from 'zustand';
+import type { Account, TenantMemberRole } from '@atlas-platform/shared';
+
+// Token storage helpers
+// Active account tokens always live in the legacy keys for api-client compatibility.
+// All per-account tokens live in `atlasmail_tokens` as a JSON map.
+
+interface TokenMap {
+  [accountId: string]: { access: string; refresh: string };
+}
+
+function readTokenMap(): TokenMap {
+  try {
+    const raw = localStorage.getItem('atlasmail_tokens');
+    return raw ? (JSON.parse(raw) as TokenMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeTokenMap(map: TokenMap) {
+  localStorage.setItem('atlasmail_tokens', JSON.stringify(map));
+}
+
+function readAccounts(): Account[] {
+  try {
+    const raw = localStorage.getItem('atlasmail_accounts');
+    return raw ? (JSON.parse(raw) as Account[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeAccounts(accounts: Account[]) {
+  localStorage.setItem('atlasmail_accounts', JSON.stringify(accounts));
+}
+
+function readActiveAccountId(): string | null {
+  return localStorage.getItem('atlasmail_active_account_id');
+}
+
+function writeActiveTokens(accountId: string, access: string, refresh: string) {
+  // Atomic: write the token map entry + active keys + active account ID together
+  const tokenMap = readTokenMap();
+  tokenMap[accountId] = { access, refresh };
+  writeTokenMap(tokenMap);
+  localStorage.setItem('atlasmail_active_account_id', accountId);
+  localStorage.setItem('atlasmail_token', access);
+  localStorage.setItem('atlasmail_refresh_token', refresh);
+}
+
+function clearActiveTokens() {
+  localStorage.removeItem('atlasmail_active_account_id');
+  localStorage.removeItem('atlasmail_token');
+  localStorage.removeItem('atlasmail_refresh_token');
+}
+
+// ─── State shape ────────────────────────────────────────────────────────────
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
+interface AuthState {
+  account: Account | null;
+  accounts: Account[];
+  tenantId: string | null;
+  tenantRole: TenantMemberRole | null;
+  isSuperAdmin: boolean;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+
+  setAccount: (account: Account | null) => void;
+  setLoading: (loading: boolean) => void;
+
+  addAccount: (account: Account, accessToken: string, refreshToken: string) => void;
+  switchAccount: (accountId: string) => void;
+  removeAccount: (accountId: string) => void;
+  updateAccount: (account: Account) => void;
+
+  logout: () => void;
+
+  sessionExpired: boolean;
+  setSessionExpired: (expired: boolean) => void;
+}
+
+// ─── Store ───────────────────────────────────────────────────────────────────
+
+// Restore persisted accounts and figure out the active account on startup.
+// The active account is whichever account's tokens are in `atlasmail_token`.
+// We match by looking for the active token in the token map.
+function deriveInitialState(): { account: Account | null; accounts: Account[]; tenantId: string | null; tenantRole: TenantMemberRole | null; isSuperAdmin: boolean } {
+  const accounts = readAccounts();
+  if (accounts.length === 0) return { account: null, accounts: [], tenantId: null, tenantRole: null, isSuperAdmin: false };
+
+
+  const tokenMap = readTokenMap();
+
+  // 1. Try the stored active account ID (reliable — not affected by token refresh races)
+  const storedActiveId = readActiveAccountId();
+  if (storedActiveId) {
+    const active = accounts.find((a) => a.id === storedActiveId);
+    const tokens = tokenMap[storedActiveId];
+    if (active && tokens) {
+      // Re-sync the active token keys in case they drifted
+      localStorage.setItem('atlasmail_token', tokens.access);
+      localStorage.setItem('atlasmail_refresh_token', tokens.refresh);
+      const payload = decodeJwtPayload(tokens.access);
+      return { account: active, accounts, tenantId: (payload?.tenantId as string) ?? null, tenantRole: (payload?.tenantRole as TenantMemberRole | undefined) ?? null, isSuperAdmin: payload?.isSuperAdmin === true };
+    }
+  }
+
+  // 2. Fallback: try to restore the first account that has tokens
+  for (const acct of accounts) {
+    const tokens = tokenMap[acct.id];
+    if (tokens) {
+      writeActiveTokens(acct.id, tokens.access, tokens.refresh);
+      const payload = decodeJwtPayload(tokens.access);
+      return { account: acct, accounts, tenantId: (payload?.tenantId as string) ?? null, tenantRole: (payload?.tenantRole as TenantMemberRole | undefined) ?? null, isSuperAdmin: payload?.isSuperAdmin === true };
+    }
+  }
+
+  // 3. No tokens at all — clear stale accounts and go to login
+  clearActiveTokens();
+  localStorage.removeItem('atlasmail_accounts');
+  localStorage.removeItem('atlasmail_tokens');
+  return { account: null, accounts: [], tenantId: null, tenantRole: null, isSuperAdmin: false };
+}
+
+const initial = deriveInitialState();
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  account: initial.account,
+  accounts: initial.accounts,
+  tenantId: initial.tenantId,
+  tenantRole: initial.tenantRole,
+  isSuperAdmin: initial.isSuperAdmin,
+  isAuthenticated: !!initial.account,
+  // deriveInitialState() always resolves to a definite state — no async step needed.
+  isLoading: false,
+
+  sessionExpired: false,
+  setSessionExpired: (expired) => set({ sessionExpired: expired }),
+
+  setAccount: (account) => {
+    set({ account, isAuthenticated: !!account, isLoading: false });
+  },
+
+  setLoading: (isLoading) => set({ isLoading }),
+
+  // ── addAccount ──────────────────────────────────────────────────────────
+  // Adds a new account to the list (or updates an existing one), stores its
+  // tokens in the map, and makes it the active account.
+  addAccount: (account, accessToken, refreshToken) => {
+    const { accounts } = get();
+    const exists = accounts.some((a) => a.id === account.id);
+    const updated = exists
+      ? accounts.map((a) => (a.id === account.id ? account : a))
+      : [...accounts, account];
+
+    writeAccounts(updated);
+    writeActiveTokens(account.id, accessToken, refreshToken);
+
+    const payload = decodeJwtPayload(accessToken);
+    set({ accounts: updated, account, tenantId: (payload?.tenantId as string) ?? null, tenantRole: (payload?.tenantRole as TenantMemberRole | undefined) ?? null, isSuperAdmin: payload?.isSuperAdmin === true, isAuthenticated: true, isLoading: false, sessionExpired: false });
+  },
+
+  // ── switchAccount ────────────────────────────────────────────────────────
+  // Swaps the active tokens in localStorage and updates the active account.
+  // Fires a custom event so query caches can be cleared.
+  switchAccount: (accountId) => {
+    const { accounts } = get();
+    const target = accounts.find((a) => a.id === accountId);
+    if (!target) return;
+
+    const tokenMap = readTokenMap();
+    const tokens = tokenMap[accountId];
+    if (!tokens) return;
+
+    writeActiveTokens(accountId, tokens.access, tokens.refresh);
+    const payload = decodeJwtPayload(tokens.access);
+    set({ account: target, tenantId: (payload?.tenantId as string) ?? null, tenantRole: (payload?.tenantRole as TenantMemberRole | undefined) ?? null, isSuperAdmin: payload?.isSuperAdmin === true, isAuthenticated: true });
+
+    window.dispatchEvent(new CustomEvent('atlasmail:account-switch', { detail: { accountId } }));
+  },
+
+  // ── removeAccount ────────────────────────────────────────────────────────
+  removeAccount: (accountId) => {
+    const { accounts, account } = get();
+    const updated = accounts.filter((a) => a.id !== accountId);
+
+    const tokenMap = readTokenMap();
+    delete tokenMap[accountId];
+
+    writeAccounts(updated);
+    writeTokenMap(tokenMap);
+
+    // If we're removing the active account, switch to the next one or clear
+    if (account?.id === accountId) {
+      if (updated.length > 0) {
+        const next = updated[0];
+        const nextTokens = tokenMap[next.id];
+        if (nextTokens) {
+          writeActiveTokens(next.id, nextTokens.access, nextTokens.refresh);
+          const payload = decodeJwtPayload(nextTokens.access);
+          set({ accounts: updated, account: next, tenantId: (payload?.tenantId as string) ?? null, tenantRole: (payload?.tenantRole as TenantMemberRole | undefined) ?? null, isSuperAdmin: payload?.isSuperAdmin === true });
+        } else {
+          clearActiveTokens();
+          set({ accounts: updated, account: next, tenantRole: null });
+        }
+        window.dispatchEvent(new CustomEvent('atlasmail:account-switch', { detail: { accountId: next.id } }));
+      } else {
+        clearActiveTokens();
+        localStorage.removeItem('atlasmail_accounts');
+        localStorage.removeItem('atlasmail_tokens');
+        set({ accounts: [], account: null, isAuthenticated: false, tenantRole: null });
+      }
+    } else {
+      set({ accounts: updated });
+    }
+  },
+
+  // ── updateAccount ────────────────────────────────────────────────────────
+  // Syncs an updated account object (e.g. after a server-side sync status change)
+  updateAccount: (account) => {
+    const { accounts } = get();
+    const alreadyIn = accounts.some((a) => a.id === account.id);
+    const base = alreadyIn ? accounts : [...accounts, account];
+    const updated = base.map((a) => (a.id === account.id ? account : a));
+    writeAccounts(updated);
+    set({
+      accounts: updated,
+      account: get().account?.id === account.id ? account : get().account,
+    });
+  },
+
+  // ── logout ───────────────────────────────────────────────────────────────
+  // Removes just the active account, or all if it's the last one.
+  logout: () => {
+    const { account } = get();
+    // Clear the session-expired flag unconditionally so the modal can
+    // dismiss even if account is already null (which otherwise makes
+    // the "Sign back in" button appear to do nothing).
+    set({ sessionExpired: false });
+
+    if (!account) {
+      // No active account — still scrub any lingering auth state and
+      // bounce to login. This is the path hit when the expired-session
+      // modal fires in a broken/partial state.
+      clearActiveTokens();
+      localStorage.removeItem('atlasmail_accounts');
+      localStorage.removeItem('atlasmail_tokens');
+      set({ account: null, accounts: [], isAuthenticated: false, tenantRole: null });
+      window.location.href = '/login';
+      return;
+    }
+
+    // Capture count BEFORE removeAccount mutates the list
+    const accountCount = get().accounts.length;
+    get().removeAccount(account.id);
+    // If this was the last account, guarantee a clean auth state and
+    // bounce to login. Otherwise the user just switched to the next
+    // remaining account, so leave them where they are.
+    if (accountCount <= 1) {
+      clearActiveTokens();
+      localStorage.removeItem('atlasmail_accounts');
+      localStorage.removeItem('atlasmail_tokens');
+      set({ account: null, accounts: [], isAuthenticated: false, tenantRole: null });
+      window.location.href = '/login';
+    } else {
+      // Multi-account case: the session-expired modal should go away
+      // (already done above) and the user is now on the next account.
+      // Force a reload so TanStack Query data re-fetches with the new
+      // identity instead of showing cached data from the logged-out one.
+      window.location.href = '/';
+    }
+  },
+}));

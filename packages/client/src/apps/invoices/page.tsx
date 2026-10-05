@@ -1,0 +1,161 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { Plus, Upload } from 'lucide-react';
+import { useInvoices } from './hooks';
+import { useAppActions } from '../../hooks/use-app-permissions';
+import { InvoicesSidebar } from './components/invoices-sidebar';
+import { InvoicesListView } from './components/invoices-list-view';
+import { InvoiceDetailPage } from './components/invoice-detail-page';
+import { InvoicesDashboard } from './components/invoices-dashboard';
+import { RecurringInvoicesList } from './components/recurring-invoices-list';
+import { ParasutInvoicesList } from './components/parasut-invoices-list';
+import { InvoiceBuilderModal } from '../../components/shared/invoice-builder-modal';
+import { PdfImportModal } from '../../components/shared/pdf-import-modal';
+import { ContentArea } from '../../components/ui/content-area';
+import { TopBar } from '../../components/layout/top-bar';
+import { Button } from '../../components/ui/button';
+import { QueryErrorState } from '../../components/ui/query-error-state';
+import type { Invoice } from '@atlas-platform/shared';
+
+export function InvoicesPage() {
+  const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // View from URL
+  const activeView = searchParams.get('view') || 'dashboard';
+  const setActiveView = useCallback((view: string) => {
+    setSearchParams({ view }, { replace: true });
+  }, [setSearchParams]);
+  const [showBuilder, setShowBuilder] = useState(searchParams.get('new') === 'true');
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [showPdfImport, setShowPdfImport] = useState(false);
+  const [builderPrefill, setBuilderPrefill] = useState<Record<string, unknown>>({});
+
+  // Prefill from URL params
+  const prefillCompanyId = searchParams.get('companyId') ?? undefined;
+  const prefillDealId = searchParams.get('dealId') ?? undefined;
+  const prefillProjectId = searchParams.get('projectId') ?? undefined;
+
+  // Data — fetch all invoices (filtering is done client-side in the list view)
+  const { data: invoicesData, isError: invoicesError, refetch: refetchInvoices } = useInvoices();
+  const invoices = invoicesData?.invoices ?? [];
+
+  // Permissions
+  const { canCreate } = useAppActions('invoices');
+
+  // Auto-open create modal from quick action URL param. Runs on every
+  // searchParams change because the user can click "New invoice" from
+  // the dashboard sub-view which only changes the query string, not
+  // the route, so the page doesn't remount.
+  useEffect(() => {
+    if (searchParams.get('action') === 'create') {
+      setShowBuilder(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const sectionTitle = activeView === 'dashboard'
+    ? t('invoices.sidebar.dashboard')
+    : activeView === 'recurring'
+      ? t('invoices.sidebar.recurring')
+      : activeView === 'parasut'
+        ? t('invoices.parasut.parasutInvoices')
+        : activeView === 'invoice-detail'
+          ? t('invoices.sidebar.invoices')
+          : t('invoices.sidebar.invoices');
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', marginLeft: 56 }}>
+      <InvoicesSidebar activeView={activeView} setActiveView={setActiveView} />
+
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+      <TopBar />
+      <ContentArea
+        title={sectionTitle}
+        actions={
+          activeView === 'invoices' && canCreate ? (
+            <>
+              <Button variant="secondary" size="sm" icon={<Upload size={14} />} onClick={() => setShowPdfImport(true)}>
+                {t('invoices.importPdf')}
+              </Button>
+              <Button variant="primary" size="sm" icon={<Plus size={14} />} onClick={() => { setEditingInvoice(null); setBuilderPrefill({}); setShowBuilder(true); }}>
+                {t('invoices.builder.createInvoice')}
+              </Button>
+            </>
+          ) : undefined
+        }
+      >
+        {activeView === 'invoice-detail' && searchParams.get('invoiceId') ? (
+          <InvoiceDetailPage
+            invoiceId={searchParams.get('invoiceId')!}
+            onBack={() => setSearchParams({ view: 'invoices' }, { replace: true })}
+          />
+        ) : activeView === 'dashboard' ? (
+          <InvoicesDashboard />
+        ) : activeView === 'recurring' ? (
+          <RecurringInvoicesList />
+        ) : activeView === 'parasut' ? (
+          <ParasutInvoicesList />
+        ) : (
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {invoicesError ? (
+                <QueryErrorState onRetry={() => refetchInvoices()} />
+              ) : (
+              <InvoicesListView
+                invoices={invoices}
+                selectedId={null}
+                onOpenDetail={(id) => setSearchParams({ view: 'invoice-detail', invoiceId: id }, { replace: true })}
+                onAdd={canCreate ? () => { setEditingInvoice(null); setBuilderPrefill({}); setShowBuilder(true); } : undefined}
+                onImportPdf={canCreate ? () => setShowPdfImport(true) : undefined}
+              />
+              )}
+            </div>
+          </div>
+        )}
+      </ContentArea>
+      </div>
+
+      {/* Builder modal */}
+      <InvoiceBuilderModal
+        open={showBuilder}
+        onClose={() => { setShowBuilder(false); setEditingInvoice(null); setBuilderPrefill({}); }}
+        invoice={editingInvoice}
+        prefill={{
+          companyId: prefillCompanyId,
+          dealId: prefillDealId,
+          projectId: prefillProjectId,
+          ...builderPrefill,
+        }}
+        onCreated={(invoice) => {
+          setShowBuilder(false);
+          setEditingInvoice(null);
+          setBuilderPrefill({});
+          setSearchParams({ view: 'invoice-detail', invoiceId: invoice.id }, { replace: true });
+        }}
+      />
+
+      {/* PDF import modal */}
+      <PdfImportModal
+        open={showPdfImport}
+        onClose={() => setShowPdfImport(false)}
+        onImport={(data) => {
+          setShowPdfImport(false);
+          setEditingInvoice(null);
+          setBuilderPrefill({
+            lineItems: data.lineItems,
+            currency: data.currency,
+            issueDate: data.issueDate,
+            dueDate: data.dueDate,
+            taxPercent: data.taxPercent,
+            notes: data.notes,
+          });
+          setShowBuilder(true);
+        }}
+      />
+    </div>
+  );
+}

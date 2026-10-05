@@ -1,0 +1,137 @@
+/* ─── Sidebar sections ─────────────────────────────────────────── */
+
+.app-sidebar-section + .app-sidebar-section {
+  /* no separator between sections */
+}
+
+/* ─── Shared context menu ──────────────────────────────────────── */
+
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-family: var(--font-family);
+  cursor: pointer;
+  border-radius: var(--radius-md, 4px);
+  transition: background 100ms ease;
+  position: relative;
+  text-align: left;
+}
+
+.context-menu-item:hover {
+  background: var(--color-surface-hover);
+}
+
+.context-menu-item.active {
+  color: var(--color-accent-primary);
+}
+
+.context-menu-item.destructive {
+  color: var(--color-danger, #e53e3e);
+}
+
+.context-menu-item.destructive:hover {
+  background: rgba(229, 62, 62, 0.08);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--color-border-primary);
+  margin: 4px 6px;
+}
+
+/* ─── Shared popover ──────────────────────────────────────────── */
+
+.popover-content {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  min-width: 320px;
+  max-width: 480px;
+  z-index: 100;
+}
+
+.popover-header {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  padding: 4px 6px 8px;
+}
+
+/* ─── Global focus ring (keyboard focus only) ──────────────────── */
+
+:where(input, select, textarea, button, [role="button"], [role="menuitem"], [role="option"], [tabindex]):focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-primary) 18%, transparent);
+  border-color: var(--color-border-focus);
+}
+
+/* Disable default browser focus outline in favour of our ring. */
+:where(input, select, textarea, button):focus {
+  outline: none;
+}
+
+/* Autofocused borderless search inputs inside modals / popovers —
+   the 3px accent ring from the global rule reads as a misplaced dark
+   rectangle around the field. Suppress it; the parent container has
+   its own border. */
+.settings-select-search-input:focus-visible,
+.bare-search-input:focus-visible {
+  box-shadow: none;
+  border-color: transparent;
+}
+
+/* Inline-edit cells (CRM table etc.) — suppress the heavy 3px accent
+   ring; the cell already has its own 1px border and sits inside a
+   tight table row where the ring reads as a ghost rectangle. */
+.inline-edit-input:focus,
+.inline-edit-input:focus-visible {
+  box-shadow: none;
+  border-color: var(--color-border-focus);
+}
+
+/* Slim, neat scrollbars across the app. Thumb is invisible until the
+   container is hovered — matches macOS overlay feel on every platform. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: color-mix(in srgb, var(--color-text-tertiary) 35%, transparent) transparent;
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-tertiary) 35%, transparent);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-text-tertiary) 55%, transparent);
+}

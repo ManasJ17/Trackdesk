@@ -1,0 +1,54 @@
+import { logger } from '../utils/logger';
+import { getRawSmtpSettings } from '../apps/system/service';
+
+/**
+ * Send an email using the SMTP settings from System > Email.
+ * Returns true if sent, false if email is not configured.
+ */
+export async function sendEmail(options: {
+  to: string;
+  cc?: string | string[];
+  subject: string;
+  text: string;
+  html?: string;
+  attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
+}): Promise<boolean> {
+  try {
+    const smtp = await getRawSmtpSettings();
+
+    if (!smtp.enabled || !smtp.host || !smtp.user) {
+      logger.debug({ to: options.to, subject: options.subject }, 'Email not sent — SMTP not configured');
+      return false;
+    }
+
+    const nodemailer = await import('nodemailer');
+    const transport = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: { user: smtp.user, pass: smtp.pass || '' },
+    });
+
+    const mailOptions: Record<string, unknown> = {
+      from: smtp.from,
+      to: options.to,
+      subject: options.subject,
+      text: options.text,
+      html: options.html,
+    };
+    if (options.attachments !== undefined) {
+      mailOptions.attachments = options.attachments;
+    }
+    if (options.cc !== undefined) {
+      mailOptions.cc = options.cc;
+    }
+
+    await transport.sendMail(mailOptions as Parameters<typeof transport.sendMail>[0]);
+
+    logger.info({ to: options.to, subject: options.subject }, 'Email sent');
+    return true;
+  } catch (error) {
+    logger.error({ error, to: options.to }, 'Failed to send email');
+    return false;
+  }
+}

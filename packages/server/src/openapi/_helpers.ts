@@ -1,0 +1,159 @@
+import { OpenAPIRegistry, extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import { z } from 'zod';
+import { validate } from './validate';
+
+extendZodWithOpenApi(z);
+
+/**
+ * The single OpenAPI registry every path module contributes to. Imported
+ * from `openapi/paths/*.ts` via `register()` / `defineRoute()` side effects.
+ * Do not instantiate a second registry — the server serves from this one.
+ */
+export const openApiRegistry = new OpenAPIRegistry();
+
+openApiRegistry.registerComponent('securitySchemes', 'bearerAuth', {
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'JWT',
+});
+
+export const EnvelopeError = z.object({
+  success: z.literal(false),
+  error: z.string(),
+  code: z.string().optional(),
+});
+
+/**
+ * Wraps a response schema in the standard Atlas envelope:
+ *   `{ success: true, data: <T> }`
+ * Every successful API response follows this shape. For errors, see
+ * EnvelopeError.
+ */
+export function envelope<T extends z.ZodTypeAny>(data: T) {
+  return z.object({ success: z.literal(true), data });
+}
+
+export const OkEnvelope = z.object({ success: z.literal(true) });
+
+export const Uuid = z.string().uuid();
+export const IsoDateTime = z.string().datetime();
+export const IsoDate = z.string().date();
+
+export const UnauthorizedResp = {
+  description: 'Unauthorized',
+  content: { 'application/json': { schema: EnvelopeError } },
+};
+
+export const NotFoundResp = {
+  description: 'Not found',
+  content: { 'application/json': { schema: EnvelopeError } },
+};
+
+export const ConflictResp = {
+  description: 'Stale resource — reload and retry',
+  content: {
+    'application/json': {
+      schema: EnvelopeError.extend({ code: z.literal('STALE_RESOURCE') }),
+    },
+  },
+};
+
+type Method = 'get' | 'post' | 'put' | 'patch' | 'delete';
+
+export interface RouteDef {
+  method: Method;
+  path: string;
+  tags: string[];
+  summary: string;
+  public?: boolean;
+  params?: z.AnyZodObject;
+  query?: z.AnyZodObject;
+  body?: z.ZodTypeAny;
+  response?: z.ZodTypeAny;
+  concurrency?: boolean;
+  extraResponses?: Record<number, { description: string; schema?: z.ZodTypeAny }>;
+}
+
+/**
+ * Register a route spec AND return an Express-middleware that validates
+ * params/query/body at runtime. Use for new routes so the OpenAPI doc
+ * and the wire contract can never drift.
+ *
+ *   // in openapi/paths/foo.ts
+ *   export const createFoo = defineRoute({
+ *     method: 'post', path: '/foo', tags: ['Foo'], summary: '...',
+ *     body: z.object({ name: z.string() }),
+ *     response: envelope(Foo),
+ *   });
+ *
+ *   // in apps/foo/routes.ts
+ *   router.post('/', createFoo.validate, controller.createFoo);
+ */
+export function defineRoute(def: RouteDef) {
+  register(def);
+  return {
+    validate: validate({
+      params: def.params,
+      query: def.query,
+      body: def.body,
+    }),
+  };
+}
+
+/**
+ * Register a route with the OpenAPI spec only. No runtime effect on the
+ * Express router — call this in an `openapi/paths/*.ts` module for every
+ * real route. Auto-generates 401 (unless public), 404 (for `/:id` paths),
+ * and 409 (if concurrency: true) responses.
+ *
+ * For routes that should also validate requests at runtime from the same
+ * schema, use `defineRoute()` instead.
+ */
+export function register(def: RouteDef) {
+  const responses: Record<number, { description: string; content?: any }> = {};
+  const okSchema = def.response ?? OkEnvelope;
+  responses[200] = {
+    description: 'Success',
+    content: { 'application/json': { schema: okSchema } },
+  };
+  if (!def.public) responses[401] = UnauthorizedResp;
+  if (def.path.includes('/:')) responses[404] = NotFoundResp;
+  if (def.concurrency) responses[409] = ConflictResp;
+  // extraResponses overrides auto-generated entries — used e.g. on /invoices/:id/pdf
+  // to replace the default JSON 200 with a binary PDF response schema.
+  if (def.extraResponses) {
+    for (const [code, r] of Object.entries(def.extraResponses)) {
+      responses[Number(code)] = {
+        description: r.description,
+        content: r.schema ? { 'application/json': { schema: r.schema } } : undefined,
+      };
+    }
+  }
+
+  const openApiPath = def.path.replace(/:([a-zA-Z0-9_]+)/g, '{$1}');
+
+  const request: any = {};
+  if (def.params) request.params = def.params;
+  if (def.query) request.query = def.query;
+  if (def.body) {
+    request.body = { content: { 'application/json': { schema: def.body } } };
+  }
+
+  openApiRegistry.registerPath({
+    method: def.method,
+    path: openApiPath,
+    tags: def.tags,
+    summary: def.summary,
+    security: def.public ? undefined : [{ bearerAuth: [] }],
+    request: Object.keys(request).length ? request : undefined,
+    responses,
+  });
+}
+
+// Common reusable schemas
+export const User = z.object({
+  id: Uuid,
+  email: z.string().email(),
+  name: z.string().nullable(),
+  createdAt: IsoDateTime,
+});

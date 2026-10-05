@@ -1,0 +1,217 @@
+import axios from 'axios';
+import { config } from '../config/env';
+import { useAuthStore } from '../stores/auth-store';
+import { useConflictStore } from '../stores/conflict-store';
+import {
+  IF_UNMODIFIED_SINCE_HEADER,
+  STALE_RESOURCE_CODE,
+} from '@atlas-platform/shared';
+
+/**
+ * The one axios instance used by every hook and controller in the client.
+ * - Adds `Authorization: Bearer <access token>` from localStorage automatically.
+ * - On 401, attempts a single refresh via /auth/refresh, then retries the
+ *   original request; if the refresh also fails, triggers session-expired.
+ * - On 409 with STALE_RESOURCE, opens the global ConflictDialog so the user
+ *   can resolve the optimistic-concurrency clash in one place.
+ *
+ * Import this; don't reach for `fetch`. Typed variants in lib/typed-api.ts
+ * layer on top.
+ */
+export const api = axios.create({
+  baseURL: config.apiUrl,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+/**
+ * Build an axios config carrying the If-Unmodified-Since header for
+ * optimistic concurrency. Pass the record's updatedAt; if undefined,
+ * returns undefined so the call site can spread it unconditionally.
+ */
+export function ifUnmodifiedSince(updatedAt?: string) {
+  return updatedAt
+    ? { headers: { [IF_UNMODIFIED_SINCE_HEADER]: updatedAt } }
+    : undefined;
+}
+
+api.interceptors.request.use((req) => {
+  const token = localStorage.getItem('atlasmail_token');
+  if (token) {
+    req.headers.Authorization = `Bearer ${token}`;
+  }
+  return req;
+});
+
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = [];
+
+function processQueue(error: unknown, token: string | null) {
+  failedQueue.forEach((promise) => {
+    if (error) promise.reject(error);
+    else promise.resolve(token!);
+  });
+  failedQueue = [];
+}
+
+/**
+ * Atomically refresh tokens in localStorage.
+ * Uses the stored active account ID instead of matching by old token value,
+ * which avoids desync when multiple requests refresh concurrently.
+ */
+function persistRefreshedTokens(newAccessToken: string, newRefreshToken?: string) {
+  const activeAccountId = localStorage.getItem('atlasmail_active_account_id');
+  if (!activeAccountId) {
+    // Fallback: just set the active token keys
+    localStorage.setItem('atlasmail_token', newAccessToken);
+    if (newRefreshToken) localStorage.setItem('atlasmail_refresh_token', newRefreshToken);
+    return;
+  }
+
+  try {
+    const raw = localStorage.getItem('atlasmail_tokens');
+    const tokenMap = raw ? (JSON.parse(raw) as Record<string, { access: string; refresh: string }>) : {};
+    const existing = tokenMap[activeAccountId];
+    tokenMap[activeAccountId] = {
+      access: newAccessToken,
+      refresh: newRefreshToken || existing?.refresh || '',
+    };
+    // Write token map and active keys together (atomic)
+    localStorage.setItem('atlasmail_tokens', JSON.stringify(tokenMap));
+    localStorage.setItem('atlasmail_token', newAccessToken);
+    if (newRefreshToken) localStorage.setItem('atlasmail_refresh_token', newRefreshToken);
+  } catch {
+    // Fallback: at minimum update the active token
+    localStorage.setItem('atlasmail_token', newAccessToken);
+    if (newRefreshToken) localStorage.setItem('atlasmail_refresh_token', newRefreshToken);
+  }
+}
+
+/**
+ * Show the session-expired modal instead of immediately logging out.
+ * The modal's "Sign back in" button calls logout() to complete the redirect.
+ */
+function handleAuthFailure() {
+  // Only show the expired modal if the user was previously authenticated.
+  // After a deliberate logout, isAuthenticated is false and we should not
+  // flash the "session expired" screen on the login page.
+  if (useAuthStore.getState().isAuthenticated) {
+    useAuthStore.getState().setSessionExpired(true);
+  }
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    // Never retry or redirect for the local identity endpoint — it's unauthenticated
+    if (originalRequest?.url?.includes('/auth/local')) {
+      return Promise.reject(error);
+    }
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        }).then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return api(originalRequest);
+        });
+      }
+      // If there's no refresh token at all, skip the refresh attempt and just
+      // propagate the 401. This avoids a hard redirect when the page loads
+      // before authentication is fully initialised (e.g. DEV_MODE race).
+      const refreshToken = localStorage.getItem('atlasmail_refresh_token');
+      if (!refreshToken) {
+        // No refresh token — can't recover. Clear stale auth state.
+        handleAuthFailure();
+        return Promise.reject(error);
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+      try {
+        const { data } = await axios.post(`${config.apiUrl}/auth/refresh`, { refreshToken });
+        const newAccessToken = data.data.accessToken;
+        const newRefreshToken = data.data.refreshToken;
+        persistRefreshedTokens(newAccessToken, newRefreshToken);
+        // Reset the preemptive refresh timer with the new token
+        schedulePreemptiveRefresh();
+        processQueue(null, newAccessToken);
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        return api(originalRequest);
+      } catch (err) {
+        processQueue(err, null);
+        handleAuthFailure();
+        return Promise.reject(err);
+      } finally {
+        isRefreshing = false;
+      }
+    }
+
+    // ─── 409 STALE_RESOURCE conflict handling ────────────────────────────────
+    if (
+      error.response?.status === 409 &&
+      error.response.data?.code === STALE_RESOURCE_CODE
+    ) {
+      const conflictRequest = error.config;
+      const currentUpdatedAt = error.response.data?.current?.updatedAt;
+      if (currentUpdatedAt && conflictRequest) {
+        return new Promise((resolve, reject) => {
+          useConflictStore
+            .getState()
+            .openConflict(conflictRequest, currentUpdatedAt, resolve, reject);
+        });
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
+
+// ─── Preemptive token refresh ────────────────────────────────────────────────
+// Refresh the access token before it expires to avoid 401 storms.
+// Access tokens expire in 1h; we refresh at 55 minutes.
+
+const PREEMPTIVE_REFRESH_MS = 55 * 60 * 1000; // 55 minutes
+let preemptiveTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function doPreemptiveRefresh() {
+  const refreshToken = localStorage.getItem('atlasmail_refresh_token');
+  if (!refreshToken) return;
+  // Don't preemptively refresh if a 401-triggered refresh is already in progress
+  if (isRefreshing) return;
+
+  try {
+    const { data } = await axios.post(`${config.apiUrl}/auth/refresh`, { refreshToken });
+    const newAccessToken = data.data.accessToken;
+    const newRefreshToken = data.data.refreshToken;
+    persistRefreshedTokens(newAccessToken, newRefreshToken);
+    schedulePreemptiveRefresh();
+  } catch {
+    // Preemptive refresh failed — the 401 interceptor will handle it when
+    // the next API call fails. No need to logout here.
+  }
+}
+
+export function schedulePreemptiveRefresh() {
+  if (preemptiveTimer) clearTimeout(preemptiveTimer);
+  const refreshToken = localStorage.getItem('atlasmail_refresh_token');
+  if (!refreshToken) return;
+  preemptiveTimer = setTimeout(doPreemptiveRefresh, PREEMPTIVE_REFRESH_MS);
+}
+
+// Start the timer on module load if already authenticated
+schedulePreemptiveRefresh();
+
+// Re-schedule whenever the active account changes (login, switch, etc.)
+useAuthStore.subscribe((state, prevState) => {
+  if (state.isAuthenticated && state.account?.id !== prevState.account?.id) {
+    schedulePreemptiveRefresh();
+  }
+  // Clear the timer on logout
+  if (!state.isAuthenticated && prevState.isAuthenticated) {
+    if (preemptiveTimer) {
+      clearTimeout(preemptiveTimer);
+      preemptiveTimer = null;
+    }
+  }
+});

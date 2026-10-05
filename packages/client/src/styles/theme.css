@@ -1,0 +1,291 @@
+:root,
+[data-theme="light"] {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #fafafa;
+  --color-bg-tertiary: #f7f7f8;
+  --color-bg-elevated: #ffffff;
+  --color-bg-overlay: rgba(15, 15, 20, 0.45);
+  --color-surface-primary: #ffffff;
+  --color-surface-hover: #f1f1f2;
+  --color-surface-active: #ebecee;
+  --color-surface-selected: #f0f1fd;
+  --color-text-primary: #1c1e21;
+  --color-text-secondary: #4d525c;
+  --color-text-tertiary: #7e838e;
+  --color-text-inverse: #ffffff;
+  --color-text-link: #5e6ad2;
+  --color-border-primary: #e6e7ea;
+  --color-border-secondary: #ebedf1;
+  --color-border-focus: #5e6ad2;
+  --color-accent-primary: #2f6feb;
+  --color-accent-primary-hover: #2258cc;
+  --color-accent-primary-active: #1a4bb0;
+  --color-accent-subtle: color-mix(in srgb, #5e6ad2 10%, transparent);
+  --color-accent-subtle-hover: color-mix(in srgb, #5e6ad2 16%, transparent);
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #e5484d;
+  --color-info: #3b82f6;
+  --color-unread-indicator: #5e6ad2;
+  --color-star: #d4a017;
+  --color-category-important: #5e6ad2;
+  --color-category-other: #7a8495;
+  --color-category-newsletters: #8b6cc4;
+  --color-category-notifications: #c47a3a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-elevated: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --gradient-card-subtle: linear-gradient(135deg, var(--color-bg-elevated) 0%, color-mix(in srgb, var(--color-bg-secondary) 40%, var(--color-bg-elevated)) 100%);
+  --gradient-accent-subtle: linear-gradient(135deg, color-mix(in srgb, var(--color-accent-primary) 6%, var(--color-bg-elevated)) 0%, var(--color-bg-elevated) 100%);
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+  --font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-md: 13px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+  --transition-fast: 100ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+  --sidebar-width: 220px;
+  --email-list-width: 400px;
+  --header-height: 48px;
+  --sidebar-bg: #fbfbfc;
+  --sidebar-text: rgb(18, 18, 18);
+  --sidebar-active: #f0f1fd;
+  --sidebar-hover: #f1f1f2;
+  --rail-bg: #f0f1f3;
+}
+
+[data-theme="dark"] {
+  --color-bg-primary: #0f1012;
+  --color-bg-secondary: #17181b;
+  --color-bg-tertiary: #1c1d20;
+  --color-bg-elevated: #17181b;
+  --color-bg-overlay: rgba(0, 0, 0, 0.6);
+  --color-surface-primary: #17181b;
+  --color-surface-hover: #23242a;
+  --color-surface-active: #2e323c;
+  --color-surface-selected: #24253a;
+  --color-text-primary: #edeef2;
+  --color-text-secondary: #b8bcc5;
+  --color-text-tertiary: #858994;
+  --color-text-inverse: #0f1012;
+  --color-text-link: #8b94ea;
+  --color-border-primary: #26272c;
+  --color-border-secondary: #36383f;
+  --color-border-focus: #8b94ea;
+  --color-accent-primary: #8b94ea;
+  --color-accent-primary-hover: #a4abef;
+  --color-accent-primary-active: #6974d0;
+  --color-accent-subtle: color-mix(in srgb, #8b94ea 14%, transparent);
+  --color-accent-subtle-hover: color-mix(in srgb, #8b94ea 22%, transparent);
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+  --color-info: #60a5fa;
+  --color-unread-indicator: #8b94ea;
+  --color-star: #d4b040;
+  --color-category-important: #8b94ea;
+  --color-category-other: #9ba2b0;
+  --color-category-newsletters: #a48bd4;
+  --color-category-notifications: #d4954a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+  --shadow-elevated: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.15);
+  --gradient-card-subtle: linear-gradient(135deg, var(--color-bg-elevated) 0%, color-mix(in srgb, var(--color-bg-tertiary) 30%, var(--color-bg-elevated)) 100%);
+  --gradient-accent-subtle: linear-gradient(135deg, color-mix(in srgb, var(--color-accent-primary) 8%, var(--color-bg-elevated)) 0%, var(--color-bg-elevated) 100%);
+  --sidebar-bg: #131418;
+  --sidebar-text: #edeef2;
+  --sidebar-active: #24253a;
+  --sidebar-hover: #23242a;
+  --rail-bg: #0a0b0d;
+}
+
+[data-density="compact"] {
+  --email-list-item-height: 84px;
+  --email-list-padding: 10px 16px;
+  --email-list-avatar: 32px;
+  --email-row-height: 36px;
+  --email-row-padding: 0 16px;
+  --email-row-avatar: 22px;
+}
+
+[data-density="default"] {
+  --email-list-item-height: 84px;
+  --email-list-padding: 10px 16px;
+  --email-list-avatar: 32px;
+  --email-row-height: 36px;
+  --email-row-padding: 0 16px;
+  --email-row-avatar: 22px;
+}
+
+[data-density="comfortable"] {
+  --email-list-item-height: 108px;
+  --email-list-padding: 16px 20px;
+  --email-list-avatar: 38px;
+  --email-row-height: 48px;
+  --email-row-padding: 0 20px;
+  --email-row-avatar: 28px;
+}
+
+/* ---- Theme transition (View Transitions API) ----------------------------- */
+
+/* Let clicks pass through the view-transition layer so dialogs stay open */
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-old(root) {
+  animation: theme-sweep-out 500ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+::view-transition-new(root) {
+  animation: theme-sweep-in 500ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes theme-sweep-out {
+  from {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+  to {
+    clip-path: inset(0 0 100% 0);
+    opacity: 0.3;
+  }
+}
+
+@keyframes theme-sweep-in {
+  from {
+    clip-path: inset(100% 0 0 0);
+    opacity: 0.3;
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+/* ---- Sidebar icon shake on hover ----------------------------------------- */
+
+@keyframes iconShake {
+  0%   { transform: translateX(0); }
+  25%  { transform: translateX(-1px); }
+  50%  { transform: translateX(1px); }
+  75%  { transform: translateX(-0.5px); }
+  100% { transform: translateX(0); }
+}
+
+.sidebar-nav-icon {
+  transition: color var(--transition-fast);
+}
+
+.sidebar-nav-btn:hover .sidebar-nav-icon {
+  animation: iconShake 400ms ease;
+}
+
+/* Brand SVG icons (CRM, HRM, Projects, Calendar) sit on a white card and
+   contain masks/gradients/filters that don't tolerate sub-pixel transform
+   animation — so they skip the shake and just stay still on hover. */
+.sidebar-nav-brand-icon {
+  flex-shrink: 0;
+}
+.sidebar-nav-btn:hover .sidebar-nav-brand-icon {
+  animation: none;
+}
+
+/* ---- Global smooth transitions ------------------------------------------- */
+
+/* Focus ring is defined in ui.css */
+
+/* Scrollbar styling is in global.css */
+
+/* ---- Responsive overlay sidebar ------------------------------------------ */
+
+.sidebar-overlay-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-overlay);
+  z-index: 40;
+  animation: fadeIn var(--transition-fast) ease;
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 260px;
+  z-index: 50;
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border-primary);
+  box-shadow: var(--shadow-lg);
+  animation: slideInLeft var(--transition-normal) ease;
+  overflow: hidden;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* ---- Tablet: 769px – 1024px ---------------------------------------------- */
+@media (max-width: 1024px) {
+  .sidebar-overlay-backdrop.is-open {
+    display: block;
+  }
+
+  .sidebar-overlay.is-open {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Mobile back button — hidden on desktop */
+  .mobile-back-button {
+    display: flex;
+  }
+}
+
+/* ---- Mobile: up to 768px ------------------------------------------------- */
+@media (max-width: 768px) {
+  /* On mobile the email-list or reading-pane are toggled full-width by JS */
+  .mobile-back-button {
+    display: flex;
+  }
+}

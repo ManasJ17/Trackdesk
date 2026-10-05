@@ -1,0 +1,93 @@
+# Atlas — Production (pre-built image from GitHub Container Registry)
+# Usage:
+#   docker compose -f docker-compose.production.yml up -d
+#   Open http://localhost:3001 and create your admin account.
+#
+# Pin a version: IMAGE_TAG=1.5.0 docker compose -f docker-compose.production.yml up -d
+# Custom .env:   Create a .env file to override any variable below.
+
+name: atlas
+
+services:
+  atlas:
+    image: ghcr.io/gorkem-bwl/atlas:${IMAGE_TAG:-latest}
+    pull_policy: always
+    container_name: atlas
+    restart: unless-stopped
+    user: root
+    ports:
+      - "${PORT:-3001}:3001"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://atlas:${POSTGRES_PASSWORD:-atlas}@postgres:5432/atlas
+      REDIS_URL: redis://redis:6379
+      CLIENT_PUBLIC_URL: ${CLIENT_PUBLIC_URL:-http://localhost:3001}
+      SERVER_PUBLIC_URL: ${SERVER_PUBLIC_URL:-http://localhost:3001}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001}
+    volumes:
+      - atlas-uploads:/app/packages/server/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+      - atlas-marketplace:/app/data/marketplace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: atlas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: atlas
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atlas}
+    volumes:
+      - atlas-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: atlas-redis
+    restart: unless-stopped
+    volumes:
+      - atlas-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Auto-updater — checks for new Atlas images and updates automatically
+  # Starts stopped. Enable via Settings > Updates or manually with: docker start atlas-watchtower
+  # WATCHTOWER_SCHEDULE uses cron syntax (default: 3 AM daily)
+  watchtower:
+    image: containrrr/watchtower
+    container_name: atlas-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_INCLUDE_STOPPED: "false"
+      WATCHTOWER_SCHEDULE: "${WATCHTOWER_SCHEDULE:-0 0 3 * * *}"
+      WATCHTOWER_ROLLING_RESTART: "true"
+      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_API_TOKEN:-atlas-watchtower-token}"
+      WATCHTOWER_HTTP_API_METRICS: "true"
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+    ports:
+      - "127.0.0.1:8070:8080"
+    command: atlas
+
+volumes:
+  atlas-uploads:
+  atlas-pg-data:
+  atlas-redis-data:
+  atlas-marketplace:

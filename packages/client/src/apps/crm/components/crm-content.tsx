@@ -1,0 +1,363 @@
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import type { ActiveView, EditingCell, SortState } from '../lib/crm-helpers';
+import type {
+  CrmDeal, CrmDealStage, CrmContact, CrmCompany, CrmActivity,
+} from '../hooks';
+import { DealKanban } from './deal-kanban';
+import { CrmDashboard } from './dashboard';
+import { DashboardCharts } from './dashboard-charts';
+import { AutomationsView } from './automations-view';
+import { AutomationEditor } from './automation-editor';
+import { LeadsView } from './leads-view';
+import { LeadDetailPage } from './lead-detail-page';
+import { DealDetailPage } from './deal-detail-page';
+import { ContactDetailPage } from './contact-detail-page';
+import { CompanyDetailPage } from './company-detail-page';
+import { LeadFormsView } from './lead-forms-view';
+import { ForecastView } from './forecast-view';
+import { DealsListView } from './views/deals-list-view';
+import { ContactsListView } from './views/contacts-list-view';
+import { CompaniesListView } from './views/companies-list-view';
+import { ActivitiesListView } from './views/activities-list-view';
+import { DealDetailPanel } from './panels/deal-detail-panel';
+import { ProposalsListView } from './proposals-list-view';
+import { ProposalDetailPanel } from './proposal-detail-panel';
+import { ProposalEditor } from './proposal-editor';
+import type { Proposal } from '../hooks';
+import { Skeleton } from '../../../components/ui/skeleton';
+
+function ListSkeleton() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 'var(--spacing-md)' }}>
+      {Array.from({ length: 10 }).map((_, i) => (
+        <Skeleton key={i} height={32} />
+      ))}
+    </div>
+  );
+}
+
+export function CrmContent({
+  activeView, setActiveView,
+  loadingDeals, loadingContacts, loadingCompanies, loadingActivities,
+  deals, filteredDeals, stages, contacts, filteredContacts, companies, filteredCompanies, activities,
+  selectedDealId, setSelectedDealId,
+  selectedContactId, setSelectedContactId,
+  selectedCompanyId, setSelectedCompanyId,
+  selectedDeal, selectedContact, selectedCompany,
+  selectedIds, setSelectedIds,
+  focusedIndex, setFocusedIndex,
+  editingCell, setEditingCell,
+  sort, setSort,
+  groupBy,
+  myRole,
+  hasDetailPanel,
+  handleMoveDeal, handleDealClick,
+  onMarkWon, onMarkLost,
+  onShowCreateDeal, onShowCreateContact, onShowCreateCompany,
+  canEditDeals, canEditContacts, canEditCompanies,
+}: {
+  activeView: ActiveView;
+  setActiveView: (view: ActiveView) => void;
+  loadingDeals: boolean;
+  loadingContacts: boolean;
+  loadingCompanies: boolean;
+  loadingActivities: boolean;
+  deals: CrmDeal[];
+  filteredDeals: CrmDeal[];
+  stages: CrmDealStage[];
+  contacts: CrmContact[];
+  filteredContacts: CrmContact[];
+  companies: CrmCompany[];
+  filteredCompanies: CrmCompany[];
+  activities: CrmActivity[];
+  selectedDealId: string | null;
+  setSelectedDealId: (id: string | null) => void;
+  selectedContactId: string | null;
+  setSelectedContactId: (id: string | null) => void;
+  selectedCompanyId: string | null;
+  setSelectedCompanyId: (id: string | null) => void;
+  selectedDeal: CrmDeal | null | undefined;
+  selectedContact: CrmContact | null | undefined;
+  selectedCompany: CrmCompany | null | undefined;
+  selectedIds: Set<string>;
+  setSelectedIds: (ids: Set<string>) => void;
+  focusedIndex: number | null;
+  setFocusedIndex: (idx: number | null) => void;
+  editingCell: EditingCell | null;
+  setEditingCell: (cell: EditingCell | null) => void;
+  sort: SortState | null;
+  setSort: (sort: SortState | null) => void;
+  groupBy: string | null;
+  myRole: string;
+  hasDetailPanel: boolean;
+  handleMoveDeal: (dealId: string, newStageId: string) => void;
+  handleDealClick: (dealId: string) => void;
+  onMarkWon: () => void;
+  onMarkLost: () => void;
+  onShowCreateDeal: () => void;
+  onShowCreateContact: () => void;
+  onShowCreateCompany: () => void;
+  canEditDeals: boolean;
+  canEditContacts: boolean;
+  canEditCompanies: boolean;
+}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  return (
+    <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+        {activeView === 'dashboard' && (
+          <div style={{ overflow: 'auto', flex: 1 }}>
+            <CrmDashboard />
+            <div style={{ padding: '0 var(--spacing-xl) var(--spacing-xl)' }}>
+              <DashboardCharts />
+            </div>
+          </div>
+        )}
+
+        {activeView === 'leads' && (
+          <LeadsView />
+        )}
+
+        {activeView === 'lead-detail' && searchParams.get('leadId') && (
+          <LeadDetailPage
+            leadId={searchParams.get('leadId')!}
+            onBack={() => setActiveView('leads')}
+            onNavigate={(leadId) => setSearchParams({ view: 'lead-detail', leadId }, { replace: true })}
+          />
+        )}
+
+        {activeView === 'deal-detail' && searchParams.get('dealId') && (
+          <DealDetailPage
+            dealId={searchParams.get('dealId')!}
+            onBack={() => setActiveView('deals')}
+            onNavigate={(dealId) => setSearchParams({ view: 'deal-detail', dealId }, { replace: true })}
+          />
+        )}
+
+        {activeView === 'leadForms' && (
+          <LeadFormsView />
+        )}
+
+        {activeView === 'forecast' && (
+          <ForecastView />
+        )}
+
+        {activeView === 'pipeline' && (loadingDeals ? <ListSkeleton /> : (
+          <DealKanban
+            deals={deals}
+            stages={stages}
+            onMoveDeal={handleMoveDeal}
+            onDealClick={handleDealClick}
+          />
+        ))}
+
+        {activeView === 'deals' && (loadingDeals ? <ListSkeleton /> : (
+          <DealsListView
+            deals={filteredDeals}
+            stages={stages}
+            selectedId={selectedDealId}
+            onSelect={handleDealClick}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            focusedIndex={focusedIndex}
+            onFocusedIndexChange={setFocusedIndex}
+            editingCell={editingCell}
+            onEditingCellChange={setEditingCell}
+            sort={sort}
+            onSortChange={setSort}
+            companies={companies}
+            onAdd={onShowCreateDeal}
+            canEdit={canEditDeals}
+            groupBy={groupBy}
+          />
+        ))}
+
+        {activeView === 'contacts' && (loadingContacts ? <ListSkeleton /> : (
+          <ContactsListView
+            contacts={filteredContacts}
+            selectedId={selectedContactId}
+            onSelect={(id) => { setSearchParams({ view: 'contact-detail', contactId: id }, { replace: true }); }}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            focusedIndex={focusedIndex}
+            onFocusedIndexChange={setFocusedIndex}
+            editingCell={editingCell}
+            onEditingCellChange={setEditingCell}
+            sort={sort}
+            onSortChange={setSort}
+            companies={companies}
+            onAdd={onShowCreateContact}
+            canEdit={canEditContacts}
+            groupBy={groupBy}
+          />
+        ))}
+
+        {activeView === 'contact-detail' && searchParams.get('contactId') && (
+          <ContactDetailPage
+            contactId={searchParams.get('contactId')!}
+            onBack={() => setActiveView('contacts')}
+            onNavigate={(contactId) => setSearchParams({ view: 'contact-detail', contactId }, { replace: true })}
+            onCompanyClick={(companyId) => setSearchParams({ view: 'company-detail', companyId }, { replace: true })}
+            onDealClick={(dealId) => setSearchParams({ view: 'deal-detail', dealId }, { replace: true })}
+          />
+        )}
+
+        {activeView === 'companies' && (loadingCompanies ? <ListSkeleton /> : (
+          <CompaniesListView
+            companies={filteredCompanies}
+            selectedId={selectedCompanyId}
+            onSelect={(id) => { setSearchParams({ view: 'company-detail', companyId: id }, { replace: true }); }}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            focusedIndex={focusedIndex}
+            onFocusedIndexChange={setFocusedIndex}
+            editingCell={editingCell}
+            onEditingCellChange={setEditingCell}
+            sort={sort}
+            onSortChange={setSort}
+            onAdd={onShowCreateCompany}
+            canEdit={canEditCompanies}
+            groupBy={groupBy}
+          />
+        ))}
+
+        {activeView === 'company-detail' && searchParams.get('companyId') && (
+          <CompanyDetailPage
+            companyId={searchParams.get('companyId')!}
+            onBack={() => setActiveView('companies')}
+            onNavigate={(companyId) => setSearchParams({ view: 'company-detail', companyId }, { replace: true })}
+            onContactClick={(contactId) => setSearchParams({ view: 'contact-detail', contactId }, { replace: true })}
+            onDealClick={(dealId) => setSearchParams({ view: 'deal-detail', dealId }, { replace: true })}
+          />
+        )}
+
+        {activeView === 'activities' && (loadingActivities ? <ListSkeleton /> : (
+          <ActivitiesListView
+            activities={activities}
+          />
+        ))}
+
+        {activeView === 'automations' && (
+          <AutomationsView stages={stages} />
+        )}
+
+        {activeView === 'automation-edit' && searchParams.get('workflowId') && (
+          <AutomationEditor
+            id={searchParams.get('workflowId')!}
+            onBack={() => setActiveView('automations')}
+          />
+        )}
+
+        {activeView === 'proposals' && (
+          <ProposalsListViewWrapper
+            setActiveView={setActiveView}
+            setSearchParams={setSearchParams}
+          />
+        )}
+
+        {activeView === 'proposal-detail' && searchParams.get('proposalId') && (
+          <ProposalDetailWrapper
+            proposalId={searchParams.get('proposalId')!}
+            onBack={() => setActiveView('proposals')}
+            setActiveView={setActiveView}
+            setSearchParams={setSearchParams}
+          />
+        )}
+      </div>
+
+      {/* Slide-out detail drawer */}
+      {hasDetailPanel && (
+        <div className="crm-drawer-backdrop" onClick={() => { setSelectedDealId(null); setSelectedContactId(null); setSelectedCompanyId(null); }} />
+      )}
+      <div className={`crm-drawer-container${hasDetailPanel ? ' open' : ''}`}>
+        {(activeView === 'pipeline' || activeView === 'deals') && selectedDeal && (
+          <DealDetailPanel
+            deal={selectedDeal}
+            stages={stages}
+            onClose={() => setSelectedDealId(null)}
+            onMarkWon={onMarkWon}
+            onMarkLost={onMarkLost}
+            onContactClick={(contactId) => { setActiveView('contacts'); setSelectedContactId(contactId); setSelectedDealId(null); setSelectedCompanyId(null); }}
+            onCompanyClick={(companyId) => { setActiveView('companies'); setSelectedCompanyId(companyId); setSelectedDealId(null); setSelectedContactId(null); }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Proposals wrappers ─────────────────────────────────────────
+
+function ProposalsListViewWrapper({
+  setActiveView,
+  setSearchParams,
+}: {
+  setActiveView: (view: ActiveView) => void;
+  setSearchParams: ReturnType<typeof useSearchParams>[1];
+}) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorPrefill, setEditorPrefill] = useState<{ dealId?: string; companyId?: string; contactId?: string } | undefined>();
+
+  // Auto-open create modal from quick action URL param
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => {
+    if (sp.get('action') === 'create') {
+      setEditorOpen(true);
+      const next = new URLSearchParams(sp);
+      next.delete('action');
+      setSp(next, { replace: true });
+    }
+  }, []);
+
+  return (
+    <>
+      <ProposalsListView
+        onSelect={(id) => setSearchParams({ view: 'proposal-detail', proposalId: id }, { replace: true })}
+        onCreateNew={(prefill) => {
+          setEditorPrefill(prefill);
+          setEditorOpen(true);
+        }}
+      />
+      <ProposalEditor
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        prefill={editorPrefill}
+      />
+    </>
+  );
+}
+
+function ProposalDetailWrapper({
+  proposalId,
+  onBack,
+  setActiveView,
+  setSearchParams,
+}: {
+  proposalId: string;
+  onBack: () => void;
+  setActiveView: (view: ActiveView) => void;
+  setSearchParams: ReturnType<typeof useSearchParams>[1];
+}) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
+
+  return (
+    <>
+      <ProposalDetailPanel
+        proposalId={proposalId}
+        onBack={onBack}
+        onEdit={(proposal) => {
+          setEditingProposal(proposal);
+          setEditorOpen(true);
+        }}
+      />
+      <ProposalEditor
+        open={editorOpen}
+        onClose={() => { setEditorOpen(false); setEditingProposal(null); }}
+        proposal={editingProposal}
+      />
+    </>
+  );
+}

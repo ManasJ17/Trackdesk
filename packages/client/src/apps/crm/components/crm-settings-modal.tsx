@@ -1,0 +1,603 @@
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
+  SettingsSection,
+  SettingsRow,
+  SettingsSelect,
+} from '../../../components/settings/settings-primitives';
+import { useCrmSettingsStore } from '../settings-store';
+import { Button } from '../../../components/ui/button';
+import { Input } from '../../../components/ui/input';
+import { IconButton } from '../../../components/ui/icon-button';
+import { Badge } from '../../../components/ui/badge';
+import { StatusDot } from '../../../components/ui/status-dot';
+import { useStages, useCreateStage, useUpdateStage, useDeleteStage, useReorderStages, useActivityTypes, useCreateActivityType, useUpdateActivityType, useDeleteActivityType, useReorderActivityTypes, useSeedActivityTypes, useGoogleSyncStatus, useStartGoogleSync, useStopGoogleSync } from '../hooks';
+import type { CrmActivityTypeConfig } from '../hooks';
+import { api } from '../../../lib/api-client';
+import { formatRelativeDate } from '../../../lib/format';
+import { Plus, Trash2, GripVertical } from 'lucide-react';
+import type { CrmDealStage } from '@atlas-platform/shared';
+
+const STAGE_COLORS = [
+  '#6b7280', '#3b82f6', '#f59e0b', '#f97316', '#10b981',
+  '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6',
+];
+
+function parseProbability(input: string): number | undefined {
+  const trimmed = input.trim();
+  if (!trimmed) return undefined;
+  const n = parseInt(trimmed, 10);
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : undefined;
+}
+
+// ─── Sortable Stage Row ───────────────────────────────────────────
+
+function SortableStageRow({
+  stage,
+  isEditing,
+  editName,
+  editColor,
+  editRottingDays,
+  editProbability,
+  onStartEdit,
+  onEditNameChange,
+  onEditColorChange,
+  onEditRottingDaysChange,
+  onEditProbabilityChange,
+  onSaveEdit,
+  onCancelEdit,
+  onDelete,
+}: {
+  stage: CrmDealStage;
+  isEditing: boolean;
+  editName: string;
+  editColor: string;
+  editRottingDays: string;
+  editProbability: string;
+  onStartEdit: () => void;
+  onEditNameChange: (v: string) => void;
+  onEditColorChange: (v: string) => void;
+  onEditRottingDaysChange: (v: string) => void;
+  onEditProbabilityChange: (v: string) => void;
+  onSaveEdit: () => void;
+  onCancelEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useTranslation();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: stage.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'var(--spacing-sm)',
+    padding: '8px var(--spacing-sm)',
+    borderRadius: 'var(--radius-md)',
+    background: isEditing ? 'var(--color-bg-tertiary)' : isDragging ? 'var(--color-surface-hover)' : 'transparent',
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <div
+        {...attributes}
+        {...listeners}
+        style={{ cursor: 'grab', display: 'flex', alignItems: 'center', flexShrink: 0, color: 'var(--color-text-tertiary)' }}
+      >
+        <GripVertical size={14} />
+      </div>
+      <StatusDot color={isEditing ? editColor : stage.color} size={12} />
+
+      {isEditing ? (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+            <Input
+              value={editName}
+              onChange={(e) => onEditNameChange(e.target.value)}
+              size="sm"
+              style={{ flex: 1 }}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && onSaveEdit()}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+              <Input
+                value={editProbability}
+                onChange={(e) => onEditProbabilityChange(e.target.value)}
+                size="sm"
+                type="number"
+                min={0}
+                max={100}
+                placeholder="0"
+                title={t('crm.settings.probabilityHint', 'Win probability (0-100)') as string}
+                style={{ width: 60, textAlign: 'right' }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-family)' }}>%</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+              <Input
+                value={editRottingDays}
+                onChange={(e) => onEditRottingDaysChange(e.target.value)}
+                size="sm"
+                type="number"
+                placeholder="0"
+                title={t('crm.settings.rottingHint', 'Warn after this many days without activity') as string}
+                style={{ width: 60, textAlign: 'right' }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-family)' }}>{t('crm.settings.daysShort', 'd')}</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+            <div style={{ display: 'flex', gap: 2, flexWrap: 'nowrap', flexShrink: 0 }}>
+              {STAGE_COLORS.map((c) => (
+                <button
+                  key={c}
+                  aria-label={`Select color ${c}`}
+                  onClick={() => onEditColorChange(c)}
+                  style={{
+                    width: 16, height: 16, borderRadius: '50%', background: c,
+                    border: editColor === c ? '2px solid var(--color-text-primary)' : '2px solid transparent',
+                    cursor: 'pointer', padding: 0, flexShrink: 0,
+                  }}
+                />
+              ))}
+            </div>
+            <Button variant="primary" size="sm" onClick={onSaveEdit}>{t('common.save')}</Button>
+            <Button variant="ghost" size="sm" onClick={onCancelEdit}>{t('common.cancel')}</Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <span
+            style={{ flex: 1, fontSize: 'var(--font-size-sm)', fontFamily: 'var(--font-family)', color: 'var(--color-text-primary)', cursor: 'pointer' }}
+            onClick={onStartEdit}
+          >
+            {stage.name}
+          </span>
+          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-family)', minWidth: 30, textAlign: 'right' }}>
+            {stage.probability}%
+          </span>
+          {stage.rottingDays != null && (
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-warning)', fontFamily: 'var(--font-family)', whiteSpace: 'nowrap' }}>
+              {stage.rottingDays}d
+            </span>
+          )}
+          <IconButton icon={<Trash2 size={12} />} label={t('crm.settings.deleteStage')} size={24} destructive onClick={onDelete} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Stages Panel ──────────────────────────────────────────────────
+
+export function CrmStagesPanel() {
+  const { t } = useTranslation();
+  const { data: stagesData } = useStages();
+  const stages = stagesData?.stages ?? [];
+  const createStage = useCreateStage();
+  const updateStage = useUpdateStage();
+  const deleteStage = useDeleteStage();
+  const reorderStages = useReorderStages();
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState('#6b7280');
+  const [editRottingDays, setEditRottingDays] = useState<string>('');
+  const [editProbability, setEditProbability] = useState<string>('');
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newColor, setNewColor] = useState('#6b7280');
+  const [newProbability, setNewProbability] = useState<string>('');
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  const startEdit = (stage: CrmDealStage) => {
+    setEditingId(stage.id);
+    setEditName(stage.name);
+    setEditColor(stage.color);
+    setEditRottingDays(stage.rottingDays != null ? String(stage.rottingDays) : '');
+    setEditProbability(String(stage.probability));
+  };
+
+  const saveEdit = () => {
+    if (editingId && editName.trim()) {
+      const rottingDays = editRottingDays.trim() ? parseInt(editRottingDays, 10) : null;
+      const probability = parseProbability(editProbability);
+      const stage = stages.find((s) => s.id === editingId);
+      updateStage.mutate({
+        id: editingId,
+        updatedAt: stage?.updatedAt,
+        name: editName.trim(),
+        color: editColor,
+        rottingDays: isNaN(rottingDays as number) ? null : rottingDays,
+        ...(probability !== undefined ? { probability } : {}),
+      });
+      setEditingId(null);
+    }
+  };
+
+  const handleAdd = () => {
+    if (!newName.trim()) return;
+    const probability = parseProbability(newProbability);
+    createStage.mutate({
+      name: newName.trim(),
+      color: newColor,
+      ...(probability !== undefined ? { probability } : {}),
+    }, {
+      onSuccess: () => {
+        setNewName('');
+        setNewColor('#6b7280');
+        setNewProbability('');
+        setShowAdd(false);
+      },
+    });
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = stages.findIndex((s) => s.id === active.id);
+    const newIndex = stages.findIndex((s) => s.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(stages, oldIndex, newIndex);
+    reorderStages.mutate(reordered.map((s) => s.id));
+  };
+
+  return (
+    <div>
+      <SettingsSection title={t('crm.settings.pipelineStages')} description={t('crm.settings.pipelineStagesDesc')}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={stages.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
+              {stages.map((stage) => (
+                <SortableStageRow
+                  key={stage.id}
+                  stage={stage}
+                  isEditing={editingId === stage.id}
+                  editName={editName}
+                  editColor={editColor}
+                  editRottingDays={editRottingDays}
+                  editProbability={editProbability}
+                  onStartEdit={() => startEdit(stage)}
+                  onEditNameChange={setEditName}
+                  onEditColorChange={setEditColor}
+                  onEditRottingDaysChange={setEditRottingDays}
+                  onEditProbabilityChange={setEditProbability}
+                  onSaveEdit={saveEdit}
+                  onCancelEdit={() => setEditingId(null)}
+                  onDelete={() => deleteStage.mutate(stage.id)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+
+        {showAdd ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', padding: '8px var(--spacing-sm)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-tertiary)', marginTop: 'var(--spacing-xs)' }}>
+            <StatusDot color={newColor} size={12} />
+            <Input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder={t('crm.settings.stageName')}
+              size="sm"
+              style={{ flex: 1 }}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+              <Input
+                value={newProbability}
+                onChange={(e) => setNewProbability(e.target.value)}
+                placeholder="0"
+                title={t('crm.settings.probabilityHint', 'Win probability (0-100)') as string}
+                size="sm"
+                type="number"
+                min={0}
+                max={100}
+                style={{ width: 60, textAlign: 'right' }}
+                onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+              />
+              <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-family)' }}>%</span>
+            </div>
+            <div style={{ display: 'flex', gap: 2, flexWrap: 'nowrap', flexShrink: 0 }}>
+              {STAGE_COLORS.slice(0, 5).map((c) => (
+                <button
+                  key={c}
+                  aria-label={`Select color ${c}`}
+                  onClick={() => setNewColor(c)}
+                  style={{
+                    width: 16, height: 16, borderRadius: '50%', background: c,
+                    border: newColor === c ? '2px solid var(--color-text-primary)' : '2px solid transparent',
+                    cursor: 'pointer', padding: 0, flexShrink: 0,
+                  }}
+                />
+              ))}
+            </div>
+            <Button variant="primary" size="sm" onClick={handleAdd} disabled={!newName.trim()}>{t('crm.settings.add')}</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setShowAdd(false); setNewName(''); setNewProbability(''); }}>{t('common.cancel')}</Button>
+          </div>
+        ) : (
+          <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={() => setShowAdd(true)} style={{ alignSelf: 'flex-start', marginTop: 'var(--spacing-xs)' }}>
+            {t('crm.settings.addStage')}
+          </Button>
+        )}
+      </SettingsSection>
+    </div>
+  );
+}
+
+// ─── Activity Types Panel ──────────────────────────────────────────
+
+const TYPE_ICONS = ['sticky-note', 'phone-call', 'mail', 'calendar-days', 'target', 'trophy'];
+
+export function CrmActivityTypesPanel() {
+  const { t } = useTranslation();
+  const { data: types } = useActivityTypes();
+  const activityTypes = types ?? [];
+  const createType = useCreateActivityType();
+  const updateType = useUpdateActivityType();
+  const deleteType = useDeleteActivityType();
+  const reorderTypes = useReorderActivityTypes();
+  const seedTypes = useSeedActivityTypes();
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState('#6b7280');
+  const [editIcon, setEditIcon] = useState('sticky-note');
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newColor, setNewColor] = useState('#6b7280');
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const startEdit = (at: CrmActivityTypeConfig) => {
+    setEditingId(at.id);
+    setEditName(at.name);
+    setEditColor(at.color);
+    setEditIcon(at.icon);
+  };
+
+  const saveEdit = () => {
+    if (editingId && editName.trim()) {
+      updateType.mutate({ id: editingId, name: editName.trim(), color: editColor, icon: editIcon });
+      setEditingId(null);
+    }
+  };
+
+  const handleAdd = () => {
+    if (!newName.trim()) return;
+    createType.mutate({ name: newName.trim(), color: newColor }, {
+      onSuccess: () => { setNewName(''); setNewColor('#6b7280'); setShowAdd(false); },
+    });
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = activityTypes.findIndex((t) => t.id === active.id);
+    const newIndex = activityTypes.findIndex((t) => t.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(activityTypes, oldIndex, newIndex);
+    reorderTypes.mutate(reordered.map((t) => t.id));
+  };
+
+  return (
+    <div>
+      <SettingsSection title={t('crm.settings.activityTypes')} description={t('crm.settings.activityTypesDesc')}>
+        {activityTypes.length === 0 && (
+          <div style={{ padding: 'var(--spacing-md)', textAlign: 'center' }}>
+            <Button variant="secondary" size="sm" onClick={() => seedTypes.mutate()}>
+              {t('crm.settings.createDefaultTypes')}
+            </Button>
+          </div>
+        )}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={activityTypes.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
+              {activityTypes.map((at) => {
+                const isEditing = editingId === at.id;
+                return (
+                  <div key={at.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)',
+                    padding: '8px var(--spacing-sm)', borderRadius: 'var(--radius-md)',
+                    background: isEditing ? 'var(--color-bg-tertiary)' : 'transparent',
+                  }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: isEditing ? editColor : at.color, flexShrink: 0 }} />
+                    {isEditing ? (
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                        <Input value={editName} onChange={(e) => setEditName(e.target.value)} size="sm" style={{ flex: 1 }} autoFocus onKeyDown={(e) => e.key === 'Enter' && saveEdit()} />
+                        <div style={{ display: 'flex', gap: 2, flexWrap: 'nowrap', flexShrink: 0 }}>
+                          {STAGE_COLORS.map((c) => (
+                            <button key={c} onClick={() => setEditColor(c)} style={{
+                              width: 14, height: 14, borderRadius: '50%', background: c,
+                              border: editColor === c ? '2px solid var(--color-text-primary)' : '2px solid transparent',
+                              cursor: 'pointer', padding: 0, flexShrink: 0,
+                            }} />
+                          ))}
+                        </div>
+                        <Button variant="primary" size="sm" onClick={saveEdit}>{t('common.save')}</Button>
+                        <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>{t('common.cancel')}</Button>
+                      </div>
+                    ) : (
+                      <>
+                        <span style={{ flex: 1, fontSize: 'var(--font-size-sm)', fontFamily: 'var(--font-family)', color: 'var(--color-text-primary)', cursor: 'pointer' }} onClick={() => startEdit(at)}>
+                          {at.name}
+                        </span>
+                        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-family)' }}>
+                          {at.icon}
+                        </span>
+                        <IconButton icon={<Trash2 size={12} />} label={t('crm.settings.deleteType')} size={24} destructive onClick={() => deleteType.mutate(at.id)} />
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </SortableContext>
+        </DndContext>
+        {showAdd ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', padding: '8px var(--spacing-sm)' }}>
+            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t('crm.settings.typeName')} size="sm" style={{ flex: 1 }} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleAdd()} />
+            <Button variant="primary" size="sm" onClick={handleAdd} disabled={!newName.trim()}>{t('crm.settings.add')}</Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowAdd(false)}>{t('common.cancel')}</Button>
+          </div>
+        ) : (
+          <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={() => setShowAdd(true)} style={{ marginTop: 'var(--spacing-xs)' }}>
+            {t('crm.settings.addActivityType')}
+          </Button>
+        )}
+      </SettingsSection>
+    </div>
+  );
+}
+
+// ─── General Panel ─────────────────────────────────────────────────
+
+export function CrmGeneralPanel() {
+  const { t } = useTranslation();
+  const { defaultView, setDefaultView } = useCrmSettingsStore();
+
+  return (
+    <div>
+      <SettingsSection title={t('crm.settings.general')}>
+        <SettingsRow label={t('crm.settings.defaultView')} description={t('crm.settings.defaultViewDesc')}>
+          <SettingsSelect
+            value={defaultView}
+            options={[
+              { value: 'dashboard', label: t('crm.sidebar.dashboard') },
+              { value: 'leads', label: t('crm.leads.title') },
+              { value: 'pipeline', label: t('crm.sidebar.pipeline') },
+              { value: 'deals', label: t('crm.sidebar.deals') },
+              { value: 'contacts', label: t('crm.sidebar.contacts') },
+              { value: 'companies', label: t('crm.sidebar.companies') },
+              { value: 'activities', label: t('crm.sidebar.activities') },
+              { value: 'forecast', label: t('crm.forecast.title') },
+            ]}
+            onChange={setDefaultView}
+          />
+        </SettingsRow>
+      </SettingsSection>
+    </div>
+  );
+}
+
+// ─── Integrations Panel ───────────────────────────────────────────
+
+export function CrmIntegrationsPanel() {
+  const { t } = useTranslation();
+  const { data: status, isLoading, refetch } = useGoogleSyncStatus();
+  const startSync = useStartGoogleSync();
+  const stopSync = useStopGoogleSync();
+
+  if (isLoading) {
+    return (
+      <div style={{ padding: 'var(--spacing-xl)', color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-family)' }}>
+        {t('common.loading')}
+      </div>
+    );
+  }
+
+  const handleConnect = async () => {
+    try {
+      const { data } = await api.get('/auth/google/connect');
+      window.open(data.data.url, '_blank', 'width=600,height=700');
+    } catch {
+      // Connection error handled silently
+    }
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      await api.post('/auth/google/disconnect');
+      refetch();
+    } catch {
+      // Disconnect error handled silently
+    }
+  };
+
+  return (
+    <div>
+      <SettingsSection title={t('crm.settings.googleIntegration')} description={t('crm.settings.googleIntegrationDesc')}>
+        {!status?.googleConfigured ? (
+          <div style={{ padding: 'var(--spacing-lg)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border-secondary)' }}>
+            <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)', fontFamily: 'var(--font-family)', marginBottom: 4 }}>
+              {t('crm.google.notConfigured')}
+            </div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-family)', lineHeight: 1.5 }}>
+              {t('crm.google.notConfiguredHelp')}
+            </div>
+          </div>
+        ) : !status?.connected ? (
+          <SettingsRow label={t('crm.settings.googleAccount')} description={t('crm.settings.googleAccountDesc')}>
+            <Button variant="primary" size="sm" onClick={handleConnect}>
+              {t('crm.google.connect')}
+            </Button>
+          </SettingsRow>
+        ) : (
+          <>
+            <SettingsRow label={t('crm.settings.connection')} description={t('crm.settings.connectionDesc')}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                <Badge variant="success">{t('crm.google.connected')}</Badge>
+                <Button variant="danger" size="sm" onClick={handleDisconnect}>
+                  {t('crm.google.disconnect')}
+                </Button>
+              </div>
+            </SettingsRow>
+
+            <SettingsRow
+              label={t('crm.settings.syncStatus')}
+              description={status.syncError || (status.lastSync ? `${t('crm.settings.lastSynced')}: ${formatRelativeDate(status.lastSync)}` : t('crm.settings.notYetSynced'))}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                <Badge variant={status.syncStatus === 'active' ? 'success' : status.syncStatus === 'error' ? 'error' : status.syncStatus === 'syncing' ? 'warning' : 'default'}>
+                  {status.syncStatus}
+                </Badge>
+                {status.redisAvailable ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => startSync.mutate()}
+                    disabled={status.syncStatus === 'syncing' || startSync.isPending}
+                  >
+                    {status.syncStatus === 'syncing' ? t('crm.google.syncing') : t('crm.google.syncNow')}
+                  </Button>
+                ) : (
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-family)' }}>
+                    {t('crm.google.redisRequired')}
+                  </span>
+                )}
+              </div>
+            </SettingsRow>
+          </>
+        )}
+      </SettingsSection>
+    </div>
+  );
+}

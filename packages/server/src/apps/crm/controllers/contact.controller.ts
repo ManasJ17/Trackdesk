@@ -1,0 +1,274 @@
+import type { Request, Response } from 'express';
+import * as crmService from '../services/contact.service';
+import * as relatedRecordsService from '../services/related-records.service';
+import { logger } from '../../../utils/logger';
+import { emitAppEvent } from '../../../services/event.service';
+import { canAccessEntity } from '../../../services/app-permissions.service';
+import { AppError } from '../../../middleware/error-handler';
+
+// ─── Contacts ───────────────────────────────────────────────────────
+
+export async function listContacts(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const { search, companyId, includeArchived } = req.query;
+
+    const perm = req.crmPerm!;
+    if (!canAccessEntity(perm.role, 'contacts', 'view', perm.entityPermissions)) {
+      res.status(403).json({ success: false, error: 'No access to contacts' });
+      return;
+    }
+
+    const contacts = await crmService.listContacts(userId, tenantId, {
+      search: search as string | undefined,
+      companyId: companyId as string | undefined,
+      includeArchived: includeArchived === 'true',
+      recordAccess: perm.recordAccess,
+    });
+
+    res.json({ success: true, data: { contacts } });
+  } catch (error) {
+    logger.error({ error }, 'Failed to list CRM contacts');
+    res.status(500).json({ success: false, error: 'Failed to list contacts' });
+  }
+}
+
+export async function getContact(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const id = req.params.id as string;
+
+    const perm = req.crmPerm!;
+    const contact = await crmService.getContact(userId, tenantId, id, perm.recordAccess);
+    if (!contact) {
+      res.status(404).json({ success: false, error: 'Contact not found' });
+      return;
+    }
+
+    res.json({ success: true, data: contact });
+  } catch (error) {
+    logger.error({ error }, 'Failed to get CRM contact');
+    res.status(500).json({ success: false, error: 'Failed to get contact' });
+  }
+}
+
+export async function createContact(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const { name, email, phone, companyId, position, source, tags, address, city, postalCode, state, country, taxId, taxOffice } = req.body;
+
+    const perm = req.crmPerm!;
+    if (!canAccessEntity(perm.role, 'contacts', 'create', perm.entityPermissions)) {
+      res.status(403).json({ success: false, error: 'No permission to create contacts' });
+      return;
+    }
+
+    if (!name?.trim()) {
+      res.status(400).json({ success: false, error: 'Name is required' });
+      return;
+    }
+
+    const contact = await crmService.createContact(userId, tenantId, {
+      name: name.trim(), email, phone, companyId, position, source, tags,
+      address, city, postalCode, state, country, taxId, taxOffice,
+    });
+
+    if (req.auth!.tenantId) {
+      emitAppEvent({
+        tenantId: req.auth!.tenantId,
+        userId,
+        appId: 'crm',
+        eventType: 'contact.created',
+        title: `added a new contact: ${contact.name}`,
+        metadata: { contactId: contact.id },
+      }).catch(() => {});
+    }
+
+    res.json({ success: true, data: contact });
+  } catch (error) {
+    // A rejected tax id is the caller's to fix, so surface it rather than
+    // burying a validation failure in a 500.
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({ success: false, error: error.message });
+      return;
+    }
+    logger.error({ error }, 'Failed to create CRM contact');
+    res.status(500).json({ success: false, error: 'Failed to create contact' });
+  }
+}
+
+export async function updateContact(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const id = req.params.id as string;
+    const { name, email, phone, companyId, position, source, tags, sortOrder, isArchived, address, city, postalCode, state, country, taxId, taxOffice } = req.body;
+
+    const perm = req.crmPerm!;
+    if (!canAccessEntity(perm.role, 'contacts', 'update', perm.entityPermissions)) {
+      res.status(403).json({ success: false, error: 'No permission to update contacts' });
+      return;
+    }
+
+    const contact = await crmService.updateContact(userId, tenantId, id, {
+      name, email, phone, companyId, position, source, tags, sortOrder, isArchived,
+      address, city, postalCode, state, country, taxId, taxOffice,
+    }, perm.recordAccess);
+
+    if (!contact) {
+      res.status(404).json({ success: false, error: 'Contact not found' });
+      return;
+    }
+
+    res.json({ success: true, data: contact });
+  } catch (error) {
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({ success: false, error: error.message });
+      return;
+    }
+    logger.error({ error }, 'Failed to update CRM contact');
+    res.status(500).json({ success: false, error: 'Failed to update contact' });
+  }
+}
+
+export async function deleteContact(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const id = req.params.id as string;
+
+    const perm = req.crmPerm!;
+    if (!canAccessEntity(perm.role, 'contacts', 'delete', perm.entityPermissions)) {
+      res.status(403).json({ success: false, error: 'No permission to delete contacts' });
+      return;
+    }
+
+    await crmService.deleteContact(userId, tenantId, id, perm.recordAccess);
+    res.json({ success: true, data: null });
+  } catch (error) {
+    logger.error({ error }, 'Failed to delete CRM contact');
+    res.status(500).json({ success: false, error: 'Failed to delete contact' });
+  }
+}
+
+export async function importContacts(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const { rows } = req.body;
+
+    if (!Array.isArray(rows)) {
+      res.status(400).json({ success: false, error: 'rows must be an array' });
+      return;
+    }
+
+    const result = await crmService.bulkCreateContacts(userId, tenantId, rows);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    logger.error({ error }, 'Failed to bulk import CRM contacts');
+    res.status(500).json({ success: false, error: 'Failed to import contacts' });
+  }
+}
+
+export async function mergeContacts(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const { primaryId, secondaryId } = req.body;
+
+    if (!primaryId || !secondaryId) {
+      res.status(400).json({ success: false, error: 'primaryId and secondaryId are required' });
+      return;
+    }
+    if (primaryId === secondaryId) {
+      res.status(400).json({ success: false, error: 'Cannot merge a record with itself' });
+      return;
+    }
+
+    const perm = req.crmPerm!;
+    if (!canAccessEntity(perm.role, 'contacts', 'update', perm.entityPermissions)) {
+      res.status(403).json({ success: false, error: 'No permission to merge contacts' });
+      return;
+    }
+
+    const merged = await crmService.mergeContacts(userId, tenantId, primaryId, secondaryId);
+    res.json({ success: true, data: merged });
+  } catch (error: any) {
+    if (error?.message?.includes('not found')) {
+      res.status(404).json({ success: false, error: error.message });
+      return;
+    }
+    logger.error({ error }, 'Failed to merge CRM contacts');
+    res.status(500).json({ success: false, error: 'Failed to merge contacts' });
+  }
+}
+
+export async function regenerateContactPortalToken(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const id = req.params.id as string;
+
+    const perm = req.crmPerm!;
+    if (!canAccessEntity(perm.role, 'contacts', 'update', perm.entityPermissions)) {
+      res.status(403).json({ success: false, error: 'No permission to update contacts' });
+      return;
+    }
+
+    const contact = await crmService.regenerateContactPortalToken(userId, tenantId, id, perm.recordAccess);
+    if (!contact) {
+      res.status(404).json({ success: false, error: 'Contact not found' });
+      return;
+    }
+
+    res.json({ success: true, data: contact });
+  } catch (error) {
+    logger.error({ error }, 'Failed to regenerate contact portal token');
+    res.status(500).json({ success: false, error: 'Failed to regenerate portal token' });
+  }
+}
+
+// ─── Related records (cross-app) ────────────────────────────────────
+
+/**
+ * Related invoices and projects for a contact. The caller must be able to
+ * view the contact itself; whether each *section* is returned is decided
+ * per target app inside the service, so a user without Invoices access sees
+ * the contact but no invoice rows.
+ */
+export async function getContactRelated(req: Request, res: Response) {
+  try {
+    const userId = req.auth!.userId;
+    const tenantId = req.auth!.tenantId;
+    const id = req.params.id as string;
+
+    const perm = req.crmPerm!;
+    if (!canAccessEntity(perm.role, 'contacts', 'view', perm.entityPermissions)) {
+      res.status(403).json({ success: false, error: 'No access to contacts' });
+      return;
+    }
+
+    // Confirm the contact exists and is visible to this caller before
+    // reporting anything related to it.
+    const contact = await crmService.getContact(userId, tenantId, id, perm.recordAccess);
+    if (!contact) {
+      res.status(404).json({ success: false, error: 'Contact not found' });
+      return;
+    }
+
+    const data = await relatedRecordsService.getRelatedRecords(
+      tenantId,
+      userId,
+      { contactId: id },
+      req.auth?.isSuperAdmin === true,
+    );
+
+    res.json({ success: true, data });
+  } catch (error) {
+    logger.error({ error }, 'Failed to load related records for CRM contact');
+    res.status(500).json({ success: false, error: 'Failed to load related records' });
+  }
+}
